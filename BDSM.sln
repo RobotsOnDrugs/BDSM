@@ -1,0 +1,30 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33020.496
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "BDSM", "BDSM.csproj", "{C956EAB0-AC01-48B9-A453-699BF7274BD1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{2B781D63-90BC-4C1F-98F6-B9C9DCF01131}"
+	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C956EAB0-AC01-48B9-A453-699BF7274BD1}.Debug|x64.ActiveCfg = Debug|x64
+		{C956EAB0-AC01-48B9-A453-699BF7274BD1}.Debug|x64.Build.0 = Debug|x64
+		{C956EAB0-AC01-48B9-A453-699BF7274BD1}.Release|x64.ActiveCfg = Release|x64
+		{C956EAB0-AC01-48B9-A453-699BF7274BD1}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0DBD5013-62AF-4A77-B542-4F7E8E0025C5}
+	EndGlobalSection
+EndGlobal

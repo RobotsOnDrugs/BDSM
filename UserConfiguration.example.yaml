@@ -1,0 +1,24 @@
+GamePath: X:\Your HoneySelect 2 DX folder here\
+ConnectionInfo:
+  Address: sideload.betterrepack.com
+  Username: sideloader
+  Password: null
+  PasswordB64: c2lkZWxvYWRlcjM=
+  Port: 2121
+  RootPath: /AI/
+  MaxConnections: 5
+PromptToContinue: true
+BaseSideloaderDirectories:
+# All searches are recursive
+# relative remote directory | relative local directory | delete files that don't exist in the repo
+- mods/Sideloader Modpack | mods\Sideloader Modpack | true
+- mods/Sideloader Modpack - Exclusive HS2 | mods\Sideloader Modpack - Exclusive HS2 | true
+#- mods/Sideloader Modpack - Exclusive AIS | mods\Sideloader Modpack - Exclusive AIS | true
+- mods/Sideloader Modpack - Maps | mods\Sideloader Modpack - Maps | true
+- mods/Sideloader Modpack - Maps (HS2 Game) | mods\Sideloader Modpack - Maps (HS2 Game) | true
+- mods/Sideloader Modpack - MaterialEditor Shaders | mods\Sideloader Modpack - MaterialEditor Shaders | true
+#- mods/Sideloader Modpack - Studio | mods\Sideloader Modpack - Studio | true
+#- mods/SideloaderModpack-BleedingEdge | mods\Sideloader Modpack - Bleeding Edge | true
+- mods/SideloaderModpack-UncensorSelector | mods\Sideloader Modpack - Uncensor Selector | true
+#- UserData-AIS | UserData | false
+- UserData-HS2 | UserData | false
