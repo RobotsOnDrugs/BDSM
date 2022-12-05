@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 namespace BDSM;
 public record Configuration
@@ -7,7 +7,7 @@ public record Configuration
 	{
 		public required string Address { get; init; }
 		public required string Username { get; init; }
-		public string EffectivePassword { get => Password ?? Encoding.UTF8.GetString(Convert.FromBase64String(PasswordB64 ?? "")); }
+		public string EffectivePassword => Password ?? Encoding.UTF8.GetString(Convert.FromBase64String(PasswordB64 ?? ""));
 		public required string? Password { get; init; }
 		public required string? PasswordB64 { get; init; }
 		public required int Port { get; init; }

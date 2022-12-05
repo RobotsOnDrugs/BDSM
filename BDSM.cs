@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -9,7 +9,6 @@ using YamlDotNet.Serialization;
 using ShellProgressBar;
 
 using static BDSM.Configuration;
-using Windows.Security.Cryptography.Core;
 
 namespace BDSM;
 
@@ -22,42 +21,63 @@ public static partial class BDSM
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleCP(uint wCodePageID);
 
-	private static readonly NLog.ILogger logger = LogManager.GetCurrentClassLogger();
-	private static readonly TaskFactory ScanTaskFactory = new();
-	private static readonly TaskFactory DLTaskFactory = new();
+	private static readonly ILogger logger = LogManager.GetCurrentClassLogger();
 
-	private static readonly StreamReader reader = File.OpenText("UserConfiguration.yaml");
-	private static string ReadAndDispose(StreamReader reader) { string yaml = reader.ReadToEnd(); reader.Dispose(); return yaml; }
-	public static readonly UserConfiguration config = new Deserializer().Deserialize<UserConfiguration>(ReadAndDispose(reader));
+	public static ConcurrentBag<PathMapping> GetPathMappingsFromConfig(UserConfiguration userconfig)
+	{
+		ConcurrentBag<PathMapping> _pathmappings = new();
+		foreach (string sideloaderdir in userconfig.BaseSideloaderDirectories)
+		{
+			string[] _sideloadersplit = sideloaderdir.Split(" | ");
+			bool _deletefiles = bool.Parse(_sideloadersplit[2]);
+			PathMapping _pathmap = new()
+			{
+				RootPath = userconfig.ConnectionInfo.RootPath,
+				RemoteRelativePath = _sideloadersplit[0],
+				GamePath = userconfig.GamePath,
+				LocalRelativePath = _sideloadersplit[1],
+				FileSize = null,
+				DeleteClientFiles = _deletefiles
+			};
+			_pathmappings.Add(_pathmap);
+		}
+		return _pathmappings;
+	}
 
-	private static long TotalBytesToDownload = 0;
-	private static long TotalBytesRemaining = 0;
 	public static int Main()
 	{
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
-		Exception? ConfigEx = null;
-		try { logger.Trace("Handling any exception thrown before Main()"); }
+
+		Exception? _configEx = null;
+		UserConfiguration? _config = null;
+		try
+		{
+			//logger.Trace("Handling any exception thrown before Main()");
+			StreamReader reader = File.OpenText("UserConfiguration.yaml");
+			string ReadAndDispose(StreamReader reader) { string yaml = reader.ReadToEnd(); reader.Dispose(); return yaml; }
+			_config = new Deserializer().Deserialize<UserConfiguration>(ReadAndDispose(reader));
+		}
 		catch (TypeInitializationException ex)
 		{
 			if (ex.InnerException is FileNotFoundException)
 				logger.Error("Your configuration file is missing. Please read the documentation and copy the example configuration to your own UserConfiguration.yaml.");
 			else
 				logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
-			ConfigEx = ex;
+			_configEx = ex;
 		}
-		catch (Exception ex) { ConfigEx = ex; }
-		if (ConfigEx is not null)
+		catch (Exception ex) { _configEx = ex; }
+		if (_configEx is not null)
 		{
-			logger.Error(ConfigEx.StackTrace);
-			logger.Error(ConfigEx.Message);
+			logger.Error(_configEx.StackTrace);
+			logger.Error(_configEx.Message);
 			logger.Error("Could not load configuration file. Aborting.");
 			PromptBeforeExit();
 			return 1;
 		}
-		else
-			logger.Info("Configuration loaded.");
-		if (config.GamePath == @"X:\Your HoneySelect 2 DX folder here\")
+		UserConfiguration UserConfig = (UserConfiguration)_config!;
+		logger.Info("Configuration loaded.");
+		if (UserConfig.GamePath == @"X:\Your HoneySelect 2 DX folder here\")
 		{
 			logger.Error("Your mod directory has not been set.");
 			PromptBeforeExit();
@@ -66,32 +86,17 @@ public static partial class BDSM
 
 		ConcurrentBag<PathMapping> BaseDirectoriesToScan = new();
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
-		foreach (string sideloaderdir in config.BaseSideloaderDirectories)
+
+		try { BaseDirectoriesToScan = GetPathMappingsFromConfig(UserConfig); }
+		catch (FormatException)
 		{
-			string[] _sideloadersplit = sideloaderdir.Split(" | ");
-			bool _deletefiles;
-			try
-			{
-				_deletefiles = bool.Parse(_sideloadersplit[2]);
-			}
-			catch (FormatException)
-			{
-				logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
-				PromptBeforeExit();
-				return 1;
-			}
-			PathMapping _pathmap = new()
-			{
-				RootPath = config.ConnectionInfo.RootPath,
-				RemoteRelativePath = _sideloadersplit[0],
-				GamePath = config.GamePath,
-				LocalRelativePath = _sideloadersplit[1],
-				FileSize = null,
-				DeleteClientFiles = _deletefiles
-			};
-			BaseDirectoriesToScan.Add(_pathmap);
-			DirectoriesToScan.Add(_pathmap);
+			logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
+			PromptBeforeExit();
+			return 1;
 		}
+		foreach (PathMapping mapping in BaseDirectoriesToScan)
+			DirectoriesToScan.Add(mapping);
+
 		Stopwatch OpTimer = new();
 
 		ConcurrentDictionary<string, PathMapping> FilesToDownload = new();
@@ -102,15 +107,15 @@ public static partial class BDSM
 		logger.Info("Scanning the server.");
 		OpTimer.Start();
 
-		for (int i = 0; i < config.ConnectionInfo.MaxConnections; i++)
-			ScanTasks.Add(ScanTaskFactory.StartNew(() => ProcessFTPDirectories(ref DirectoriesToScan, config.ConnectionInfo)));
+		TaskFactory ScanTaskFactory = new();
+		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
+			_ = ScanTasks.Add(ScanTaskFactory.StartNew(() => ProcessFTPDirectories(ref DirectoriesToScan, UserConfig.ConnectionInfo)));
 		Task<ConcurrentDictionary<string, PathMapping>>[] ScanTaskArray = ScanTasks.ToArray();
 		Task.WaitAll(ScanTaskArray);
 
-		IEnumerable<ConcurrentDictionary<string, PathMapping>> FilesToDownloadEnumerable = ScanTaskArray.Select(task => task.Result);
-		foreach (ConcurrentDictionary<string, PathMapping> pathmaps in FilesToDownloadEnumerable)
+		foreach (ConcurrentDictionary<string, PathMapping> pathmaps in ScanTaskArray.Select(task => task.Result))
 			foreach (PathMapping pathmap in pathmaps.Values)
-				FilesToDownload.TryAdd(pathmap.LocalFullPathLower, pathmap);
+				_ = FilesToDownload.TryAdd(pathmap.LocalFullPathLower, pathmap);
 
 		OpTimer.Stop();
 
@@ -147,12 +152,14 @@ public static partial class BDSM
 			logger.Info("Nothing to download.");
 		else
 		{
+			long TotalBytesToDownload = 0;
+			long TotalBytesRemaining = 0;
 			logger.Info("Downloading files.");
 			foreach (KeyValuePair<string, PathMapping> pathmap in FilesToDownload)
 				TotalBytesToDownload += (long)pathmap.Value.FileSize!;
 			logger.Info($"{FilesToDownload.Count} file{(FilesToDownload.Count == 1 ? "" : "s")} ({FormatBytes(TotalBytesToDownload)}) to download.");
 			TotalBytesRemaining = TotalBytesToDownload;
-			if (config.PromptToContinue)
+			if (UserConfig.PromptToContinue)
 				PromptUserToContinue();
 
 			OpTimer.Restart();
@@ -163,15 +170,13 @@ public static partial class BDSM
 			DateTime TotalProgressDateTimeStart = DateTime.Now;
 			ConcurrentDictionary<int, double> downloadspeeds = new();
 			double totalspeed = 0;
-			//int taskidx = 0;
 			using ProgressBar Progressbar = new(100, "Downloading files:", new ProgressBarOptions { CollapseWhenFinished = true, DisplayTimeInRealTime = false, EnableTaskBarProgress = true, ProgressCharacter = ' ' });
-			for (int i = 0; i < config.ConnectionInfo.MaxConnections; i++)
-				DLTasks.Add(ScanTaskFactory.StartNew(() =>
+			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
+				_ = DLTasks.Add(ScanTaskFactory.StartNew(() =>
 					{
-						//taskidx = i;
 						int id = Environment.CurrentManagedThreadId;
 						KeyValuePair<string, PathMapping> _pm_kvp;
-						using FtpClient _dlclient = new(config.ConnectionInfo.Address, config.ConnectionInfo.Username, config.ConnectionInfo.EffectivePassword, config.ConnectionInfo.Port);
+						using FtpClient _dlclient = new(UserConfig.ConnectionInfo.Address, UserConfig.ConnectionInfo.Username, UserConfig.ConnectionInfo.EffectivePassword, UserConfig.ConnectionInfo.Port);
 						_dlclient.Config.EncryptionMode = FtpEncryptionMode.Auto;
 						_dlclient.Config.ValidateAnyCertificate = true;
 						_dlclient.Config.LogToConsole = false;
@@ -218,15 +223,14 @@ public static partial class BDSM
 
 								bytestransferredsince = _ftpprogress.TransferredBytes - oldtransferredbytes;
 								oldtransferredbytes = _ftpprogress.TransferredBytes;
-								Interlocked.Add(ref TotalBytesRemaining, 0 - bytestransferredsince);
+								_ = Interlocked.Add(ref TotalBytesRemaining, 0 - bytestransferredsince);
 								float remaining = (float)TotalBytesRemaining / (float)TotalBytesToDownload;
-								float percentremaining = (remaining * Progressbar!.MaxTicks);
+								float percentremaining = remaining * Progressbar!.MaxTicks;
 								double rounded = Math.Round(percentremaining);
 								int roundedint = Convert.ToInt32(rounded);
 								_bytesdownloaded = TotalBytesToDownload - TotalBytesRemaining;
 								TimeElapsed = DateTime.Now - TotalProgressDateTimeStart;
 								MillisecondsElapsed = TimeElapsed.TotalMilliseconds;
-								//MillisecondsElapsed += _progresstimeelapseddouble;
 								OverallSpeed = Math.Round(_bytesdownloaded / (MillisecondsElapsed / 1000), 2);
 								if (bytestransferredsince != 0)
 								{
@@ -247,15 +251,12 @@ public static partial class BDSM
 									childpbar.Message = $"{_pm_kvp.Value.FileName} | Downloaded {FormatBytes((double)_pm_kvp.Value.FileSize)} at {FormatBytes(_ftpprogress.TransferSpeed)}/s";
 									return;
 								}
-								else
-								{
-									double timeremaining = bytesremaining / _ftpprogress.TransferSpeed;
-									int timeremainingint = (int)Math.Round(timeremaining);
-									childpbar.Message = $"{_pm_kvp.Value.FileName} | {FormatBytes(_ftpprogress.TransferredBytes)} / {FormatBytes((double)_pm_kvp.Value.FileSize)} ({FormatBytes(_ftpprogress.TransferSpeed)}/s)";
-									childpbar.Tick(_ftpprogress.ETA);
-									childpbar.Tick((int)Math.Round(_ftpprogress.Progress));
-									bytesremaining = (long)_pm_kvp.Value.FileSize! - _ftpprogress.TransferredBytes;
-								}
+								double timeremaining = bytesremaining / _ftpprogress.TransferSpeed;
+								int timeremainingint = (int)Math.Round(timeremaining);
+								childpbar.Message = $"{_pm_kvp.Value.FileName} | {FormatBytes(_ftpprogress.TransferredBytes)} / {FormatBytes((double)_pm_kvp.Value.FileSize)} ({FormatBytes(_ftpprogress.TransferSpeed)}/s)";
+								childpbar.Tick(_ftpprogress.ETA);
+								childpbar.Tick((int)Math.Round(_ftpprogress.Progress));
+								bytesremaining = (long)_pm_kvp.Value.FileSize! - _ftpprogress.TransferredBytes;
 							}
 							OverallSpeed = 0;
 
@@ -268,7 +269,7 @@ public static partial class BDSM
 							else
 								logger.Info($"Download of {_pm_kvp.Value.RemoteFullPath}: {status}");
 						}
-						downloadspeeds.Remove(id, out _);
+						_ = downloadspeeds.Remove(id, out _);
 						return;
 					}));
 			Task[] DLTaskArray = DLTasks.ToArray();
@@ -283,12 +284,12 @@ public static partial class BDSM
 			logger.Info("Nothing to delete.");
 		else
 		{
-			DeleteFiles(FilesToDelete, config.PromptToContinue);
+			DeleteFiles(FilesToDelete, UserConfig.PromptToContinue);
 			logger.Info($"{FilesToDelete.Count} files{(FilesToDelete.Count == 1 ? "" : "s")} deleted.");
 		}
 
 		logger.Info("Finished updating.");
-		if (config.PromptToContinue)
+		if (UserConfig.PromptToContinue)
 			PromptUserToContinue();
 		return 0;
 	}
@@ -347,11 +348,11 @@ public static partial class BDSM
 	public static void DeleteFiles(IEnumerable<dynamic> FilesToDelete, bool promptuser)
 	{
 		logger.Info("Deleting files:");
-		foreach (var pm in FilesToDelete)
+		foreach (dynamic pm in FilesToDelete)
 			logger.Info($"{pm.FullPath}");
 		if (promptuser)
 			PromptUserToContinue();
-		foreach (var pm in FilesToDelete)
+		foreach (dynamic pm in FilesToDelete)
 			File.Delete(pm.FullPath);
 	}
 	public static string FormatBytes(double NumberOfBytes)

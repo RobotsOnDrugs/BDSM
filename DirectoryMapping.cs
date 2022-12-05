@@ -1,4 +1,4 @@
-﻿namespace BDSM;
+namespace BDSM;
 public readonly record struct PathMapping
 {
 	public required string GamePath { get; init; }
