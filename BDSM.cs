@@ -9,6 +9,7 @@ using YamlDotNet.Serialization;
 using ShellProgressBar;
 
 using static BDSM.Configuration;
+using Windows.Security.Cryptography.Core;
 
 namespace BDSM;
 
@@ -160,10 +161,15 @@ public static partial class BDSM
 			double MillisecondsElapsed = 0;
 			TimeSpan TimeElapsed = new();
 			DateTime TotalProgressDateTimeStart = DateTime.Now;
+			ConcurrentDictionary<int, double> downloadspeeds = new();
+			double totalspeed = 0;
+			//int taskidx = 0;
 			using ProgressBar Progressbar = new(100, "Downloading files:", new ProgressBarOptions { CollapseWhenFinished = true, DisplayTimeInRealTime = false, EnableTaskBarProgress = true, ProgressCharacter = ' ' });
 			for (int i = 0; i < config.ConnectionInfo.MaxConnections; i++)
 				DLTasks.Add(ScanTaskFactory.StartNew(() =>
 					{
+						//taskidx = i;
+						int id = Environment.CurrentManagedThreadId;
 						KeyValuePair<string, PathMapping> _pm_kvp;
 						using FtpClient _dlclient = new(config.ConnectionInfo.Address, config.ConnectionInfo.Username, config.ConnectionInfo.EffectivePassword, config.ConnectionInfo.Port);
 						_dlclient.Config.EncryptionMode = FtpEncryptionMode.Auto;
@@ -181,7 +187,7 @@ public static partial class BDSM
 							}
 							catch (InvalidOperationException)
 							{
-								logger.Debug($"No more files to download in {Environment.CurrentManagedThreadId}");
+								logger.Debug($"No more files to download in {id}");
 								break;
 							}
 							if (!_pm_removed)
@@ -224,8 +230,12 @@ public static partial class BDSM
 								OverallSpeed = Math.Round(_bytesdownloaded / (MillisecondsElapsed / 1000), 2);
 								if (bytestransferredsince != 0)
 								{
+									downloadspeeds[id] = _ftpprogress.TransferSpeed;
+									foreach (double speed in downloadspeeds.Values)
+										totalspeed += speed;
 									Progressbar.Tick(Progressbar.MaxTicks - roundedint);
-									Progressbar.Message = $"Downloading files: {FormatBytes(TotalBytesToDownload - TotalBytesRemaining)} / {FormatBytes(TotalBytesToDownload)} (Average speed: {FormatBytes(OverallSpeed)}/s)";
+									Progressbar.Message = $"Downloading files: {FormatBytes(TotalBytesToDownload - TotalBytesRemaining)} / {FormatBytes(TotalBytesToDownload)} (Current speed: {FormatBytes(totalspeed)}/s) (Average speed: {FormatBytes(OverallSpeed)}/s)";
+									totalspeed = 0;
 									OverallSpeed = 0;
 								}
 								_bytesdownloaded = 0;
@@ -258,7 +268,7 @@ public static partial class BDSM
 							else
 								logger.Info($"Download of {_pm_kvp.Value.RemoteFullPath}: {status}");
 						}
-						OverallSpeed = 0;
+						downloadspeeds.Remove(id, out _);
 						return;
 					}));
 			Task[] DLTaskArray = DLTasks.ToArray();
