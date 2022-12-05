@@ -9,6 +9,7 @@ using YamlDotNet.Serialization;
 using ShellProgressBar;
 
 using static BDSM.Configuration;
+using static BDSM.UtilityFunctions;
 
 namespace BDSM;
 
@@ -22,27 +23,6 @@ public static partial class BDSM
 	private static partial bool SetConsoleCP(uint wCodePageID);
 
 	private static readonly ILogger logger = LogManager.GetCurrentClassLogger();
-
-	public static ConcurrentBag<PathMapping> GetPathMappingsFromConfig(UserConfiguration userconfig)
-	{
-		ConcurrentBag<PathMapping> _pathmappings = new();
-		foreach (string sideloaderdir in userconfig.BaseSideloaderDirectories)
-		{
-			string[] _sideloadersplit = sideloaderdir.Split(" | ");
-			bool _deletefiles = bool.Parse(_sideloadersplit[2]);
-			PathMapping _pathmap = new()
-			{
-				RootPath = userconfig.ConnectionInfo.RootPath,
-				RemoteRelativePath = _sideloadersplit[0],
-				GamePath = userconfig.GamePath,
-				LocalRelativePath = _sideloadersplit[1],
-				FileSize = null,
-				DeleteClientFiles = _deletefiles
-			};
-			_pathmappings.Add(_pathmap);
-		}
-		return _pathmappings;
-	}
 
 	public static int Main()
 	{
@@ -100,20 +80,20 @@ public static partial class BDSM
 		Stopwatch OpTimer = new();
 
 		ConcurrentDictionary<string, PathMapping> FilesToDownload = new();
-		ConcurrentBag<dynamic> FilesToDelete = new();
-		HashSet<Task<ConcurrentDictionary<string, PathMapping>>> ScanTasks = new();
-		HashSet<Task> DLTasks = new();
+		ConcurrentBag<FileInfo> FilesToDelete = new();
+		HashSet<Task<ConcurrentDictionary<string, PathMapping>>> scantasks = new();
+		HashSet<Task> download_tasks = new();
 
 		logger.Info("Scanning the server.");
 		OpTimer.Start();
 
-		TaskFactory ScanTaskFactory = new();
+		TaskFactory FTPConnectionTaskFactory = new();
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-			_ = ScanTasks.Add(ScanTaskFactory.StartNew(() => ProcessFTPDirectories(ref DirectoriesToScan, UserConfig.ConnectionInfo)));
-		Task<ConcurrentDictionary<string, PathMapping>>[] ScanTaskArray = ScanTasks.ToArray();
-		Task.WaitAll(ScanTaskArray);
+			_ = scantasks.Add(FTPConnectionTaskFactory.StartNew(() => ProcessFTPDirectories(ref DirectoriesToScan, UserConfig.ConnectionInfo)));
+		Task<ConcurrentDictionary<string, PathMapping>>[] scantaskarray = scantasks.ToArray();
+		Task.WaitAll(scantaskarray);
 
-		foreach (ConcurrentDictionary<string, PathMapping> pathmaps in ScanTaskArray.Select(task => task.Result))
+		foreach (ConcurrentDictionary<string, PathMapping> pathmaps in scantaskarray.Select(task => task.Result))
 			foreach (PathMapping pathmap in pathmaps.Values)
 				_ = FilesToDownload.TryAdd(pathmap.LocalFullPathLower, pathmap);
 
@@ -124,33 +104,43 @@ public static partial class BDSM
 		OpTimer.Restart();
 		foreach (PathMapping pm in BaseDirectoriesToScan)
 		{
-			_ = Parallel.ForEach(new DirectoryInfo(pm.LocalFullPath).EnumerateFiles("*", new EnumerationOptions() { RecurseSubdirectories = true }).AsParallel(), (fileondisk) =>
+			_ = Parallel.ForEach(new DirectoryInfo(pm.LocalFullPath).EnumerateFiles("*", new EnumerationOptions() { RecurseSubdirectories = true }).AsParallel(), (fileondiskinfo) =>
 			{
-				logger.Debug("Processing " + fileondisk.FullName);
-				var fileondiskinfo = new { FullPath = fileondisk.FullName, FileSize = fileondisk.Length };
-				bool itemFound = false;
+				logger.Debug("Processing " + fileondiskinfo.FullName);
+				bool item_found = false;
 				foreach (KeyValuePair<string, PathMapping> todownload in FilesToDownload)
 				{
-					if (todownload.Key == fileondiskinfo.FullPath.ToLower() && todownload.Value.FileSize == fileondiskinfo.FileSize)
+					if (todownload.Key == fileondiskinfo.FullName.ToLower() && todownload.Value.FileSize == fileondiskinfo.Length)
 					{
 						if (!FilesToDownload.TryRemove(todownload))
 							logger.Warn(todownload.Value.LocalFullPathLower);
-						itemFound = true;
+						item_found = true;
 						break;
 					}
-					itemFound = false;
+					item_found = false;
 				}
-				if (!itemFound)
+				if (!item_found)
 					if (pm.DeleteClientFiles)
 						FilesToDelete.Add(fileondiskinfo);
 			});
 		}
 		OpTimer.Stop();
 		logger.Info($"Comparison took {OpTimer.ElapsedMilliseconds}ms.");
+		logger.Info($"{FilesToDownload.Count} file{(FilesToDownload.Count == 1 ? "" : "s")} to download and {FilesToDelete.Count} file{(FilesToDelete.Count == 1 ? "" : "s")} to delete.");
 
-		if (FilesToDownload.IsEmpty)
-			logger.Info("Nothing to download.");
-		else
+		if (!FilesToDelete.IsEmpty)
+		{
+			logger.Info("Deleting files:");
+			foreach (FileInfo pm in FilesToDelete)
+				logger.Info($"{pm.FullName}");
+			if (UserConfig.PromptToContinue)
+				PromptUserToContinue();
+			foreach (FileInfo pm in FilesToDelete)
+				File.Delete(pm.FullName);
+			logger.Info($"{FilesToDelete.Count} file{(FilesToDelete.Count == 1 ? "" : "s")} deleted.");
+		}
+
+		if (!FilesToDownload.IsEmpty)
 		{
 			long TotalBytesToDownload = 0;
 			long TotalBytesRemaining = 0;
@@ -163,47 +153,54 @@ public static partial class BDSM
 				PromptUserToContinue();
 
 			OpTimer.Restart();
-			long _bytesdownloaded = 0;
-			double OverallSpeed = 0;
-			double MillisecondsElapsed = 0;
-			TimeSpan TimeElapsed = new();
-			DateTime TotalProgressDateTimeStart = DateTime.Now;
-			ConcurrentDictionary<int, double> downloadspeeds = new();
-			double totalspeed = 0;
-			using ProgressBar Progressbar = new(100, "Downloading files:", new ProgressBarOptions { CollapseWhenFinished = true, DisplayTimeInRealTime = false, EnableTaskBarProgress = true, ProgressCharacter = ' ' });
+			long bytes_downloaded = 0;
+			double overall_speed = 0;
+			double milliseconds_elapsed = 0;
+			TimeSpan time_elapsed = new();
+			DateTime total_progress_start_time = DateTime.Now;
+			ConcurrentDictionary<int, double> download_speeds = new();
+			double total_speed = 0;
+			ProgressBarOptions total_pbar_options = new()
+			{
+				CollapseWhenFinished = true,
+				DisplayTimeInRealTime = true,
+				EnableTaskBarProgress = true,
+				ProgressCharacter = ' '
+			};
+			using ProgressBar TotalProgressBar = new(100, "Downloading files:", total_pbar_options);
 			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-				_ = DLTasks.Add(ScanTaskFactory.StartNew(() =>
+				_ = download_tasks.Add(FTPConnectionTaskFactory.StartNew(() =>
 					{
 						int id = Environment.CurrentManagedThreadId;
-						KeyValuePair<string, PathMapping> _pm_kvp;
-						using FtpClient _dlclient = new(UserConfig.ConnectionInfo.Address, UserConfig.ConnectionInfo.Username, UserConfig.ConnectionInfo.EffectivePassword, UserConfig.ConnectionInfo.Port);
-						_dlclient.Config.EncryptionMode = FtpEncryptionMode.Auto;
-						_dlclient.Config.ValidateAnyCertificate = true;
-						_dlclient.Config.LogToConsole = false;
-						_dlclient.Encoding = Encoding.UTF8;
-						_dlclient.Connect();
+						KeyValuePair<string, PathMapping> pm_kvp;
+						using FtpClient download_client = new(UserConfig.ConnectionInfo.Address, UserConfig.ConnectionInfo.Username, UserConfig.ConnectionInfo.EffectivePassword, UserConfig.ConnectionInfo.Port);
+						download_client.Config.EncryptionMode = FtpEncryptionMode.Auto;
+						download_client.Config.ValidateAnyCertificate = true;
+						download_client.Config.LogToConsole = false;
+						download_client.Encoding = Encoding.UTF8;
+						download_client.Connect();
 						while (!FilesToDownload.IsEmpty)
 						{
-							bool _pm_removed;
+							bool pm_was_removed;
 							try
 							{
-								_pm_kvp = FilesToDownload.First();
-								_pm_removed = FilesToDownload.TryRemove(_pm_kvp);
+								pm_kvp = FilesToDownload.First();
+								pm_was_removed = FilesToDownload.TryRemove(pm_kvp);
 							}
 							catch (InvalidOperationException)
 							{
 								logger.Debug($"No more files to download in {id}");
 								break;
 							}
-							if (!_pm_removed)
+							if (!pm_was_removed)
 								break;
-							PathMapping _currentpm = _pm_kvp.Value;
-							_ = FilesToDownload.TryRemove(_pm_kvp);
+							//PathMapping _currentpm = pm_kvp.Value;
+							_ = FilesToDownload.TryRemove(pm_kvp);
 
-							long bytesremaining = (long)_pm_kvp.Value.FileSize!;
-							long bytestransferredsince = 0;
-							long oldtransferredbytes = 0;
-							ProgressBarOptions cparoptions = new()
+							long bytes_remaining = (long)pm_kvp.Value.FileSize!;
+							long bytes_transferred_since = 0;
+							long old_transferred_bytes = 0;
+							ProgressBarOptions child_pbar_options = new()
 							{
 								CollapseWhenFinished = true,
 								ShowEstimatedDuration = true,
@@ -211,93 +208,77 @@ public static partial class BDSM
 								ProgressBarOnBottom = true,
 								ProgressCharacter = '-'
 							};
-							using ChildProgressBar childpbar = Progressbar.Spawn(100, $"{_pm_kvp.Value.FileName} 0/{FormatBytes((double)_pm_kvp.Value.FileSize)}",cparoptions);
-							DateTime _progresstimeelapsed = DateTime.Now;
-							void ftpprogress(FtpProgress _ftpprogress)
+							using ChildProgressBar child_pbar = TotalProgressBar.Spawn(100, $"{pm_kvp.Value.FileName} 0/{FormatBytes((double)pm_kvp.Value.FileSize)}",child_pbar_options);
+							DateTime progress_start_time = DateTime.Now;
+							void ftpprogress(FtpProgress ftp_progress)
 							{
-								double _progresstimeelapseddouble = (DateTime.Now - _progresstimeelapsed).TotalMilliseconds;
-								if (childpbar is null)
-									return;
-								if (_progresstimeelapseddouble < 250)
+								double progress_time_elapsed = (DateTime.Now - progress_start_time).TotalMilliseconds;
+								if (progress_time_elapsed < 250)
 									return;
 
-								bytestransferredsince = _ftpprogress.TransferredBytes - oldtransferredbytes;
-								oldtransferredbytes = _ftpprogress.TransferredBytes;
-								_ = Interlocked.Add(ref TotalBytesRemaining, 0 - bytestransferredsince);
+								bytes_transferred_since = ftp_progress.TransferredBytes - old_transferred_bytes;
+								old_transferred_bytes = ftp_progress.TransferredBytes;
+								_ = Interlocked.Add(ref TotalBytesRemaining, 0 - bytes_transferred_since);
 								float remaining = (float)TotalBytesRemaining / (float)TotalBytesToDownload;
-								float percentremaining = remaining * Progressbar!.MaxTicks;
+								float percentremaining = remaining * TotalProgressBar.MaxTicks;
 								double rounded = Math.Round(percentremaining);
 								int roundedint = Convert.ToInt32(rounded);
-								_bytesdownloaded = TotalBytesToDownload - TotalBytesRemaining;
-								TimeElapsed = DateTime.Now - TotalProgressDateTimeStart;
-								MillisecondsElapsed = TimeElapsed.TotalMilliseconds;
-								OverallSpeed = Math.Round(_bytesdownloaded / (MillisecondsElapsed / 1000), 2);
-								if (bytestransferredsince != 0)
+								bytes_downloaded = TotalBytesToDownload - TotalBytesRemaining;
+								time_elapsed = DateTime.Now - total_progress_start_time;
+								milliseconds_elapsed = time_elapsed.TotalMilliseconds;
+								overall_speed = Math.Round(bytes_downloaded / (milliseconds_elapsed / 1000), 2);
+								if (bytes_transferred_since != 0)
 								{
-									downloadspeeds[id] = _ftpprogress.TransferSpeed;
-									foreach (double speed in downloadspeeds.Values)
-										totalspeed += speed;
-									Progressbar.Tick(Progressbar.MaxTicks - roundedint);
-									Progressbar.Message = $"Downloading files: {FormatBytes(TotalBytesToDownload - TotalBytesRemaining)} / {FormatBytes(TotalBytesToDownload)} (Current speed: {FormatBytes(totalspeed)}/s) (Average speed: {FormatBytes(OverallSpeed)}/s)";
-									totalspeed = 0;
-									OverallSpeed = 0;
+									download_speeds[id] = ftp_progress.TransferSpeed;
+									foreach (double speed in download_speeds.Values)
+										total_speed += speed;
+									TotalProgressBar.Tick(TotalProgressBar.MaxTicks - roundedint);
+									TotalProgressBar.Message = $"Downloading files: {FormatBytes(TotalBytesToDownload - TotalBytesRemaining)} / {FormatBytes(TotalBytesToDownload)} (Current speed: {FormatBytes(total_speed)}/s) (Average speed: {FormatBytes(overall_speed)}/s)";
+									total_speed = 0;
+									overall_speed = 0;
 								}
-								_bytesdownloaded = 0;
-								_progresstimeelapsed = DateTime.Now;
-								_progresstimeelapseddouble = 0;
-								if (_ftpprogress.Progress >= 100)
+								bytes_downloaded = 0;
+								progress_start_time = DateTime.Now;
+								progress_time_elapsed = 0;
+								if (ftp_progress.Progress >= 100)
 								{
-									childpbar.Tick(new TimeSpan());
-									childpbar.Message = $"{_pm_kvp.Value.FileName} | Downloaded {FormatBytes((double)_pm_kvp.Value.FileSize)} at {FormatBytes(_ftpprogress.TransferSpeed)}/s";
+									child_pbar.Tick(new TimeSpan());
+									child_pbar.Message = $"{pm_kvp.Value.FileName} | Downloaded {FormatBytes((double)pm_kvp.Value.FileSize)} at {FormatBytes(ftp_progress.TransferSpeed)}/s";
 									return;
 								}
-								double timeremaining = bytesremaining / _ftpprogress.TransferSpeed;
-								int timeremainingint = (int)Math.Round(timeremaining);
-								childpbar.Message = $"{_pm_kvp.Value.FileName} | {FormatBytes(_ftpprogress.TransferredBytes)} / {FormatBytes((double)_pm_kvp.Value.FileSize)} ({FormatBytes(_ftpprogress.TransferSpeed)}/s)";
-								childpbar.Tick(_ftpprogress.ETA);
-								childpbar.Tick((int)Math.Round(_ftpprogress.Progress));
-								bytesremaining = (long)_pm_kvp.Value.FileSize! - _ftpprogress.TransferredBytes;
+								double time_remaining = bytes_remaining / ftp_progress.TransferSpeed;
+								int timeremainingint = (int)Math.Round(time_remaining);
+								child_pbar.Message = $"{pm_kvp.Value.FileName} | {FormatBytes(ftp_progress.TransferredBytes)} / {FormatBytes((double)pm_kvp.Value.FileSize)} ({FormatBytes(ftp_progress.TransferSpeed)}/s)";
+								child_pbar.Tick(ftp_progress.ETA);
+								child_pbar.Tick((int)Math.Round(ftp_progress.Progress));
+								bytes_remaining = (long)pm_kvp.Value.FileSize! - ftp_progress.TransferredBytes;
 							}
-							OverallSpeed = 0;
+							overall_speed = 0;
 
-							FtpStatus status = _dlclient.DownloadFile(_pm_kvp.Value.LocalFullPath, _pm_kvp.Value.RemoteFullPath, FtpLocalExists.Overwrite, FtpVerify.OnlyChecksum, ftpprogress);
+							FtpStatus status = download_client.DownloadFile(pm_kvp.Value.LocalFullPath, pm_kvp.Value.RemoteFullPath, FtpLocalExists.Overwrite, FtpVerify.OnlyChecksum, ftpprogress);
 							if (status != FtpStatus.Success)
 							{
-								logger.Error($"Download of {_pm_kvp.Value.RemoteFullPath}: {status}");
+								logger.Error($"Download of {pm_kvp.Value.RemoteFullPath}: {status}");
 								Debugger.Break();
 							}
 							else
-								logger.Info($"Download of {_pm_kvp.Value.RemoteFullPath}: {status}");
+								logger.Info($"Download of {pm_kvp.Value.RemoteFullPath}: {status}");
 						}
-						_ = downloadspeeds.Remove(id, out _);
+						_ = download_speeds.Remove(id, out _);
 						return;
 					}));
-			Task[] DLTaskArray = DLTasks.ToArray();
 
-			Task.WaitAll(DLTaskArray);
+			Task.WaitAll(download_tasks.ToArray());
 			OpTimer.Stop();
-			Progressbar.WriteLine("Downloads finished.");
-			logger.Info($"Downloaded {TotalBytesToDownload} bytes in {OpTimer.Elapsed.Minutes} minutes and {OpTimer.Elapsed.Seconds} seconds.");
-			logger.Info($"Average speed: {FormatBytes(TotalBytesToDownload / OpTimer.Elapsed.TotalSeconds)}");
+			TotalProgressBar.Message = "";
+			TotalProgressBar.Dispose();
+			logger.Info($"Downloaded {FormatBytes(TotalBytesToDownload)} bytes in {OpTimer.Elapsed.Minutes} minutes and {OpTimer.Elapsed.Seconds} seconds.");
+			logger.Info($"Average speed: {FormatBytes(TotalBytesToDownload / OpTimer.Elapsed.TotalSeconds)}/s");
 		}
-		if (FilesToDelete.IsEmpty)
-			logger.Info("Nothing to delete.");
-		else
-		{
-			DeleteFiles(FilesToDelete, UserConfig.PromptToContinue);
-			logger.Info($"{FilesToDelete.Count} files{(FilesToDelete.Count == 1 ? "" : "s")} deleted.");
-		}
-
 		logger.Info("Finished updating.");
 		if (UserConfig.PromptToContinue)
 			PromptUserToContinue();
 		return 0;
-	}
-
-	private static void PromptBeforeExit()
-	{
-		Console.WriteLine("Press any key to exit.");
-		_ = Console.ReadKey();
 	}
 
 	public static ConcurrentDictionary<string, PathMapping> ProcessFTPDirectories(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo)
@@ -344,32 +325,5 @@ public static partial class BDSM
 				}
 		}
 		return files;
-	}
-	public static void DeleteFiles(IEnumerable<dynamic> FilesToDelete, bool promptuser)
-	{
-		logger.Info("Deleting files:");
-		foreach (dynamic pm in FilesToDelete)
-			logger.Info($"{pm.FullPath}");
-		if (promptuser)
-			PromptUserToContinue();
-		foreach (dynamic pm in FilesToDelete)
-			File.Delete(pm.FullPath);
-	}
-	public static string FormatBytes(double NumberOfBytes)
-	{
-		NumberOfBytes = Math.Round(NumberOfBytes, 2);
-		return NumberOfBytes switch
-		{
-			< 1100 * 1 => $"{NumberOfBytes} B",
-			< 1100 * 1024 => $"{Math.Round(NumberOfBytes / 1024, 2)} KiB",
-			< 1100 * 1024 * 1024 => $"{Math.Round(NumberOfBytes / (1024 * 1024), 2)} MiB",
-			>= 1100 * 1024 * 1024 => $"{Math.Round(NumberOfBytes / (1024 * 1024 * 1024), 2)} GiB",
-			double.NaN => "unknown"
-		};
-	}
-	public static void PromptUserToContinue()
-	{
-		Console.WriteLine("Press any key to continue or Ctrl-C to abort");
-		_ = Console.ReadKey();
 	}
 }
