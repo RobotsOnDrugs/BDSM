@@ -27,6 +27,8 @@ public static class UtilityFunctions
 				FileSize = null,
 				DeleteClientFiles = _deletefiles
 			};
+			if (!new DirectoryInfo(_pathmap.LocalFullPath).Exists)
+				_ = Directory.CreateDirectory(_pathmap.LocalFullPath);
 			_pathmappings.Add(_pathmap);
 		}
 		return _pathmappings;

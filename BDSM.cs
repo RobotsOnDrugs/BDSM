@@ -106,7 +106,7 @@ public static partial class BDSM
 		{
 			_ = Parallel.ForEach(new DirectoryInfo(pm.LocalFullPath).EnumerateFiles("*", new EnumerationOptions() { RecurseSubdirectories = true }).AsParallel(), (fileondiskinfo) =>
 			{
-				logger.Debug("Processing " + fileondiskinfo.FullName);
+				logger.Debug($"Processing {fileondiskinfo.FullName}");
 				bool item_found = false;
 				foreach (KeyValuePair<string, PathMapping> todownload in FilesToDownload)
 				{
@@ -130,7 +130,7 @@ public static partial class BDSM
 
 		if (!FilesToDelete.IsEmpty)
 		{
-			logger.Info("Deleting files:");
+			logger.Info("Will delete files:");
 			foreach (FileInfo pm in FilesToDelete)
 				logger.Info($"{pm.FullName}");
 			if (UserConfig.PromptToContinue)
@@ -272,7 +272,7 @@ public static partial class BDSM
 			OpTimer.Stop();
 			TotalProgressBar.Message = "";
 			TotalProgressBar.Dispose();
-			logger.Info($"Downloaded {FormatBytes(TotalBytesToDownload)} bytes in {OpTimer.Elapsed.Minutes} minutes and {OpTimer.Elapsed.Seconds} seconds.");
+			logger.Info($"Downloaded {FormatBytes(TotalBytesToDownload)} in {(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}{OpTimer.Elapsed.Seconds} seconds.");
 			logger.Info($"Average speed: {FormatBytes(TotalBytesToDownload / OpTimer.Elapsed.TotalSeconds)}/s");
 		}
 		logger.Info("Finished updating.");
