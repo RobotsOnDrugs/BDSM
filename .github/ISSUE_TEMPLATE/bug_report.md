@@ -7,21 +7,26 @@ assignees: RobotsOnDrugs
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
-
-**To Reproduce**
-Paste your UserConfiguration.yaml and any steps need to reproduce the error.
-Provide any conditions needed to reproduce.
-
 **Expected behavior**
-A clear and concise description of what you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+*What did you expect to happen?*
 
-**Desktop (please complete the following information):**
+
+**Actual behavior**
+
+*What happened instead? Paste any errors shown.*
+
+**Required information**
+
+*Paste your UserConfiguration.yaml here.*
+
+**System information**
+
+*Only Windows 10 version 2004 (10.0.19041) and above (including Windows 11) are officially supported. If you use a supported OS and believe your issue is specific to your version, provide that information here.*
+
+*If you are not using a supported OS, file a feature request or post a general question/comment instead to discuss support for it.*
  - OS and version: [e.g. Windows 10 22H2]
 
-**Additional context**
-Add any other context about the problem here.
+**Additional information**
+
+*Provide any conditions needed to reproduce and any relevant information to help explain the issue.*

@@ -33,7 +33,6 @@ public static partial class BDSM
 		UserConfiguration? _config = null;
 		try
 		{
-			//logger.Trace("Handling any exception thrown before Main()");
 			StreamReader reader = File.OpenText("UserConfiguration.yaml");
 			string ReadAndDispose(StreamReader reader) { string yaml = reader.ReadToEnd(); reader.Dispose(); return yaml; }
 			_config = new Deserializer().Deserialize<UserConfiguration>(ReadAndDispose(reader));
@@ -81,7 +80,7 @@ public static partial class BDSM
 
 		ConcurrentDictionary<string, PathMapping> FilesToDownload = new();
 		ConcurrentBag<FileInfo> FilesToDelete = new();
-		HashSet<Task<ConcurrentDictionary<string, PathMapping>>> scantasks = new();
+		HashSet<Task<ConcurrentDictionary<string, PathMapping?>>> scantasks = new();
 		HashSet<Task> download_tasks = new();
 
 		logger.Info("Scanning the server.");
@@ -90,12 +89,47 @@ public static partial class BDSM
 		TaskFactory FTPConnectionTaskFactory = new();
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
 			_ = scantasks.Add(FTPConnectionTaskFactory.StartNew(() => ProcessFTPDirectories(ref DirectoriesToScan, UserConfig.ConnectionInfo)));
-		Task<ConcurrentDictionary<string, PathMapping>>[] scantaskarray = scantasks.ToArray();
-		Task.WaitAll(scantaskarray);
+		Task<ConcurrentDictionary<string, PathMapping?>>[] scantaskarray = scantasks.ToArray();
+		try { Task.WaitAll(scantaskarray); }
+		catch (AggregateException ex)
+		{
+			logger.Error("Could not scan the server. Failed scan tasks had the following errors:");
+			foreach (Exception exception in ex.InnerExceptions)
+			{
+				logger.Error(exception.Message);
+				logger.Error(exception.StackTrace);
+			}
+			logger.Error("Please file a bug report and provide this information. https://github.com/RobotsOnDrugs/BDSM/issues");
+			return 1;
+		}
 
-		foreach (ConcurrentDictionary<string, PathMapping> pathmaps in scantaskarray.Select(task => task.Result))
-			foreach (PathMapping pathmap in pathmaps.Values)
-				_ = FilesToDownload.TryAdd(pathmap.LocalFullPathLower, pathmap);
+		bool missed_some_files = false;
+		ConcurrentBag<string> missed_files = new();
+		foreach (ConcurrentDictionary<string, PathMapping?> pathmaps in scantaskarray.Select(task => task.Result))
+			foreach (KeyValuePair<string, PathMapping?> pathmap_kvp in pathmaps)
+			{
+				if (pathmap_kvp.Value is not null)
+					_ = FilesToDownload.TryAdd(((PathMapping)pathmap_kvp.Value).LocalFullPathLower, (PathMapping)pathmap_kvp.Value!);
+				else
+				{
+					missed_some_files = true;
+					missed_files.Add(pathmap_kvp.Key);
+				}
+			}
+		if (FilesToDownload.IsEmpty)
+		{
+			logger.Error("No files could be scanned due to network or other errors.");
+			return 1;
+		}
+		if (missed_some_files)
+		{
+			logger.Debug("Could not scan all files on the server. The following files could not be compared:");
+			foreach (string missed_file in missed_files)
+			{
+				logger.Debug(missed_file);
+			}
+			logger.Warn("Some files could not be scanned due to network errors.");
+		}
 
 		OpTimer.Stop();
 
@@ -194,7 +228,6 @@ public static partial class BDSM
 							}
 							if (!pm_was_removed)
 								break;
-							//PathMapping _currentpm = pm_kvp.Value;
 							_ = FilesToDownload.TryRemove(pm_kvp);
 
 							long bytes_remaining = (long)pm_kvp.Value.FileSize!;
@@ -281,7 +314,7 @@ public static partial class BDSM
 		return 0;
 	}
 
-	public static ConcurrentDictionary<string, PathMapping> ProcessFTPDirectories(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo)
+	public static ConcurrentDictionary<string, PathMapping?> ProcessFTPDirectories(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo)
 	{
 		using FtpClient scanclient = new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port);
 		scanclient.Config.EncryptionMode = FtpEncryptionMode.Auto;
@@ -290,7 +323,7 @@ public static partial class BDSM
 		scanclient.Encoding = Encoding.UTF8;
 		scanclient.Connect();
 		int times_waited = 0;
-		ConcurrentDictionary<string, PathMapping> files = new();
+		ConcurrentDictionary<string, PathMapping?> files = new();
 		while (true)
 		{
 			if (!pathmaps.TryTake(out PathMapping pathmap))
@@ -308,7 +341,27 @@ public static partial class BDSM
 			string localpath = pathmap.LocalFullPath;
 			times_waited = 0;
 			PathMapping _pathmap;
-			foreach (FtpListItem item in scanclient.GetListing(remotepath))
+			FtpListItem[]? _scanned_files = null;
+			FtpListItem[]? scanned_files;
+			int scan_attempts = 0;
+			try
+			{
+				_scanned_files = scanclient.GetListing(remotepath);
+			}
+			catch (IOException)
+			{
+				scan_attempts++;
+				Thread.Sleep(500);
+				if (scan_attempts < 3)
+					_scanned_files = null;
+			}
+			if (_scanned_files is null)
+			{
+				_ = files.TryAdd(localpath.ToLower(), null);
+				continue;
+			}
+			scanned_files = _scanned_files;
+			foreach (FtpListItem item in scanned_files)
 				switch (item.Type)
 				{
 					case FtpObjectType.File:
