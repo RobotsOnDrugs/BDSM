@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 
 using static BDSM.Configuration;
 
@@ -46,6 +41,7 @@ public static class UtilityFunctions
 			double.NaN => "unknown"
 		};
 	}
+	public static string Pluralize(int quantity, string suffix) => quantity == 1 ? suffix : suffix + "s";
 	public static void PromptUserToContinue()
 	{
 		Console.WriteLine("Press any key to continue or Ctrl-C to abort");

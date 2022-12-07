@@ -29,7 +29,7 @@ public static partial class BDSM
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
 
-		Exception? _configEx = null;
+		Exception? _config_ex = null;
 		UserConfiguration? _config = null;
 		try
 		{
@@ -43,13 +43,13 @@ public static partial class BDSM
 				logger.Error("Your configuration file is missing. Please read the documentation and copy the example configuration to your own UserConfiguration.yaml.");
 			else
 				logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
-			_configEx = ex;
+			_config_ex = ex;
 		}
-		catch (Exception ex) { _configEx = ex; }
-		if (_configEx is not null)
+		catch (Exception ex) { _config_ex = ex; }
+		if (_config_ex is not null)
 		{
-			logger.Error(_configEx.StackTrace);
-			logger.Error(_configEx.Message);
+			logger.Error(_config_ex.StackTrace);
+			logger.Error(_config_ex.Message);
 			logger.Error("Could not load configuration file. Aborting.");
 			PromptBeforeExit();
 			return 1;
@@ -160,7 +160,7 @@ public static partial class BDSM
 		}
 		OpTimer.Stop();
 		logger.Info($"Comparison took {OpTimer.ElapsedMilliseconds}ms.");
-		logger.Info($"{FilesToDownload.Count} file{(FilesToDownload.Count == 1 ? "" : "s")} to download and {FilesToDelete.Count} file{(FilesToDelete.Count == 1 ? "" : "s")} to delete.");
+		logger.Info($"{Pluralize(FilesToDownload.Count, " file")} to download and {Pluralize(FilesToDelete.Count, " file")} to delete.");
 
 		if (!FilesToDelete.IsEmpty)
 		{
@@ -171,7 +171,7 @@ public static partial class BDSM
 				PromptUserToContinue();
 			foreach (FileInfo pm in FilesToDelete)
 				File.Delete(pm.FullName);
-			logger.Info($"{FilesToDelete.Count} file{(FilesToDelete.Count == 1 ? "" : "s")} deleted.");
+			logger.Info($"{Pluralize(FilesToDelete.Count, " file")} deleted.");
 		}
 
 		if (!FilesToDownload.IsEmpty)
@@ -181,7 +181,7 @@ public static partial class BDSM
 			logger.Info("Downloading files.");
 			foreach (KeyValuePair<string, PathMapping> pathmap in FilesToDownload)
 				TotalBytesToDownload += (long)pathmap.Value.FileSize!;
-			logger.Info($"{FilesToDownload.Count} file{(FilesToDownload.Count == 1 ? "" : "s")} ({FormatBytes(TotalBytesToDownload)}) to download.");
+			logger.Info($"{Pluralize(FilesToDownload.Count, " file")} ({FormatBytes(TotalBytesToDownload)}) to download.");
 			TotalBytesRemaining = TotalBytesToDownload;
 			if (UserConfig.PromptToContinue)
 				PromptUserToContinue();
@@ -305,7 +305,7 @@ public static partial class BDSM
 			OpTimer.Stop();
 			TotalProgressBar.Message = "";
 			TotalProgressBar.Dispose();
-			logger.Info($"Downloaded {FormatBytes(TotalBytesToDownload)} in {(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}{OpTimer.Elapsed.Seconds} seconds.");
+			logger.Info($"Downloaded {FormatBytes(TotalBytesToDownload)} in {(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}{Pluralize(OpTimer.Elapsed.Seconds, " second")}.");
 			logger.Info($"Average speed: {FormatBytes(TotalBytesToDownload / OpTimer.Elapsed.TotalSeconds)}/s");
 		}
 		logger.Info("Finished updating.");
@@ -342,7 +342,7 @@ public static partial class BDSM
 			times_waited = 0;
 			PathMapping _pathmap;
 			FtpListItem[]? _scanned_files = null;
-			FtpListItem[]? scanned_files;
+			FtpListItem[] scanned_files;
 			int scan_attempts = 0;
 			try
 			{
