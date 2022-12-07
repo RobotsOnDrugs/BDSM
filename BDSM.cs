@@ -80,7 +80,7 @@ public static partial class BDSM
 
 		ConcurrentDictionary<string, PathMapping> FilesToDownload = new();
 		ConcurrentBag<FileInfo> FilesToDelete = new();
-		HashSet<Task<ConcurrentDictionary<string, PathMapping?>>> scantasks = new();
+		HashSet<Task<ConcurrentDictionary<string, PathMapping?>>> scan_tasks = new();
 		HashSet<Task> download_tasks = new();
 
 		logger.Info("Scanning the server.");
@@ -88,9 +88,9 @@ public static partial class BDSM
 
 		TaskFactory FTPConnectionTaskFactory = new();
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-			_ = scantasks.Add(FTPConnectionTaskFactory.StartNew(() => ProcessFTPDirectories(ref DirectoriesToScan, UserConfig.ConnectionInfo)));
-		Task<ConcurrentDictionary<string, PathMapping?>>[] scantaskarray = scantasks.ToArray();
-		try { Task.WaitAll(scantaskarray); }
+			_ = scan_tasks.Add(FTPConnectionTaskFactory.StartNew(() => ProcessFTPDirectories(ref DirectoriesToScan, UserConfig.ConnectionInfo)));
+		Task<ConcurrentDictionary<string, PathMapping?>>[] scan_task_array = scan_tasks.ToArray();
+		try { Task.WaitAll(scan_task_array); }
 		catch (AggregateException ex)
 		{
 			logger.Error("Could not scan the server. Failed scan tasks had the following errors:");
@@ -105,7 +105,7 @@ public static partial class BDSM
 
 		bool missed_some_files = false;
 		ConcurrentBag<string> missed_files = new();
-		foreach (ConcurrentDictionary<string, PathMapping?> pathmaps in scantaskarray.Select(task => task.Result))
+		foreach (ConcurrentDictionary<string, PathMapping?> pathmaps in scan_task_array.Select(task => task.Result))
 			foreach (KeyValuePair<string, PathMapping?> pathmap_kvp in pathmaps)
 			{
 				if (pathmap_kvp.Value is not null)
@@ -136,9 +136,28 @@ public static partial class BDSM
 		logger.Info($"Scanned {FilesToDownload.Count} files in {OpTimer.ElapsedMilliseconds}ms.");
 		logger.Info("Comparing files.");
 		OpTimer.Restart();
+		bool local_access_successful = true;
+		List<Exception> local_access_exceptions = new();
 		foreach (PathMapping pm in BaseDirectoriesToScan)
 		{
-			_ = Parallel.ForEach(new DirectoryInfo(pm.LocalFullPath).EnumerateFiles("*", new EnumerationOptions() { RecurseSubdirectories = true }).AsParallel(), (fileondiskinfo) =>
+			DirectoryInfo base_dir_di;
+			ParallelQuery<FileInfo> file_enumeration;
+			try
+			{
+				base_dir_di = new(pm.LocalFullPath);
+				file_enumeration = base_dir_di.EnumerateFiles("*", new EnumerationOptions() { RecurseSubdirectories = true }).AsParallel();
+			}
+			catch (Exception ex)
+			{
+				local_access_successful = false;
+				logger.Error($"Could not access {pm.LocalFullPath}. Ensure that you have the correct path specified in your configuration and that you have permission to access it.");
+				local_access_exceptions.Add(ex);
+				continue;
+			}
+			if (!local_access_successful)
+				throw new AggregateException(local_access_exceptions);
+
+			ParallelLoopResult file_enumeration_result = Parallel.ForEach(file_enumeration, (fileondiskinfo) =>
 			{
 				logger.Debug($"Processing {fileondiskinfo.FullName}");
 				bool item_found = false;
@@ -164,14 +183,34 @@ public static partial class BDSM
 
 		if (!FilesToDelete.IsEmpty)
 		{
+			ConcurrentBag<FileInfo> failed_to_delete = new();
+			List<Exception> failed_deletions = new();
 			logger.Info("Will delete files:");
 			foreach (FileInfo pm in FilesToDelete)
 				logger.Info($"{pm.FullName}");
 			if (UserConfig.PromptToContinue)
 				PromptUserToContinue();
 			foreach (FileInfo pm in FilesToDelete)
-				File.Delete(pm.FullName);
-			logger.Info($"{Pluralize(FilesToDelete.Count, " file")} deleted.");
+			{
+				try
+				{
+					File.Delete(pm.FullName);
+				}
+				catch (Exception ex)
+				{
+					failed_to_delete.Add(pm);
+					failed_deletions.Add(ex);
+					logger.Warn(ex.Message);
+					continue;
+				}
+			}
+			logger.Info($"{Pluralize(FilesToDelete.Count - failed_to_delete.Count, " file")} deleted.");
+			Debug.Assert(failed_deletions.Count == failed_to_delete.Count);
+			if (failed_deletions.Count > 0)
+			{
+				logger.Error($"{Pluralize(failed_to_delete.Count, " file")} could not be deleted.");
+				throw new AggregateException(failed_deletions);
+			}
 		}
 
 		if (!FilesToDownload.IsEmpty)
@@ -288,7 +327,7 @@ public static partial class BDSM
 							}
 							overall_speed = 0;
 
-							FtpStatus status = download_client.DownloadFile(pm_kvp.Value.LocalFullPath, pm_kvp.Value.RemoteFullPath, FtpLocalExists.Overwrite, FtpVerify.OnlyChecksum, ftpprogress);
+							FtpStatus status = download_client.DownloadFile(pm_kvp.Value.LocalFullPath, pm_kvp.Value.RemoteFullPath, FtpLocalExists.Overwrite, FtpVerify.None, ftpprogress);
 							if (status != FtpStatus.Success)
 							{
 								logger.Error($"Download of {pm_kvp.Value.RemoteFullPath}: {status}");

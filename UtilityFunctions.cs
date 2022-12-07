@@ -41,7 +41,7 @@ public static class UtilityFunctions
 			double.NaN => "unknown"
 		};
 	}
-	public static string Pluralize(int quantity, string suffix) => quantity == 1 ? suffix : suffix + "s";
+	public static string Pluralize(int quantity, string suffix) => quantity == 1 ? quantity.ToString() + suffix : quantity.ToString() + suffix + "s";
 	public static void PromptUserToContinue()
 	{
 		Console.WriteLine("Press any key to continue or Ctrl-C to abort");
