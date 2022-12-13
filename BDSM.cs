@@ -31,10 +31,10 @@ public static partial class BDSM
 
 		Exception? _config_ex = null;
 		UserConfiguration? _config = null;
+		string ReadAndDispose(StreamReader reader) { string yaml = reader.ReadToEnd(); reader.Dispose(); return yaml; }
 		try
 		{
 			StreamReader reader = File.OpenText("UserConfiguration.yaml");
-			string ReadAndDispose(StreamReader reader) { string yaml = reader.ReadToEnd(); reader.Dispose(); return yaml; }
 			_config = new Deserializer().Deserialize<UserConfiguration>(ReadAndDispose(reader));
 		}
 		catch (TypeInitializationException ex)
@@ -65,21 +65,44 @@ public static partial class BDSM
 
 		ConcurrentBag<PathMapping> BaseDirectoriesToScan = new();
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
-
-		try { BaseDirectoriesToScan = GetPathMappingsFromConfig(UserConfig); }
-		catch (FormatException)
-		{
-			logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
-			PromptBeforeExit();
-			return 1;
-		}
-		foreach (PathMapping mapping in BaseDirectoriesToScan)
-			DirectoriesToScan.Add(mapping);
-
-		Stopwatch OpTimer = new();
-
 		ConcurrentDictionary<string, PathMapping> FilesToDownload = new();
 		ConcurrentBag<FileInfo> FilesToDelete = new();
+
+		bool SkipScan = false;
+#if DEBUG
+		StreamReader skip_reader = File.OpenText("SkipScan.yaml");
+		SkipScanConfiguration _skip_config = new Deserializer().Deserialize<SkipScanConfiguration>(ReadAndDispose(skip_reader));
+		SkipScan = _skip_config.SkipScan;
+		if (SkipScan)
+		{
+			using FtpClient _scanner = new(UserConfig.ConnectionInfo.Address, UserConfig.ConnectionInfo.Username, UserConfig.ConnectionInfo.EffectivePassword, UserConfig.ConnectionInfo.Port);
+			_scanner.Config.EncryptionMode = FtpEncryptionMode.Auto;
+			_scanner.Config.ValidateAnyCertificate = true;
+			_scanner.Config.LogToConsole = false;
+			_scanner.Encoding = Encoding.UTF8;
+			_scanner.Connect();
+			foreach (PathMapping pathmap in GetPathMappingsFromSkipScanConfig(_skip_config, UserConfig))
+			{
+				FtpListItem _dl_file_info = _scanner.GetObjectInfo(pathmap.RemoteFullPath);
+				FilesToDownload.TryAdd(pathmap.LocalFullPathLower, pathmap with { FileSize = _dl_file_info.Size });
+			}
+			_scanner.Dispose();
+		}
+#endif
+		if (!SkipScan)
+		{
+			try { BaseDirectoriesToScan = GetPathMappingsFromUserConfig(UserConfig); }
+			catch (FormatException)
+			{
+				logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
+				PromptBeforeExit();
+				return 1;
+			}
+			foreach (PathMapping mapping in BaseDirectoriesToScan)
+				DirectoriesToScan.Add(mapping);
+		}
+
+		Stopwatch OpTimer = new();
 		HashSet<Task<ConcurrentDictionary<string, PathMapping?>>> scan_tasks = new();
 		HashSet<Task> download_tasks = new();
 
