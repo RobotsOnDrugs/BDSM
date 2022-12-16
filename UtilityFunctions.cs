@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Collections.Immutable;
 
 using static BDSM.Configuration;
 
@@ -47,7 +48,40 @@ public static class UtilityFunctions
 		}
 		return _mappings;
 	}
+	public static FileDownload PathMappingToFileDownload(PathMapping pm)
+	{
+		List<DownloadChunk> chunks = new();
+		long filesize = (long)pm.FileSize!;
+		const int chunksize = 1024 * 1024 * 10;
+		(long full_chunks, long remaining_bytes) = Math.DivRem(filesize, chunksize);
+		long num_chunks = full_chunks + ((remaining_bytes > 0) ? 1 : 0);
+		for (int i = 0; i < num_chunks; i++)
+		{
+			int _offset = i * chunksize;
+			long _remaining = filesize - _offset;
+			int _length = (_remaining > chunksize) ? chunksize : (int)_remaining;
+			DownloadChunk chunk = new()
+			{
+				LocalPath = pm.LocalFullPath,
+				RemotePath = pm.RemoteFullPath,
+				Offset = _offset,
+				Length = _length
+			};
+			chunks.Add(chunk);
+		}
+		return new()
+		{
+			LocalPath = pm.LocalFullPath,
+			RemotePath = pm.RemoteFullPath,
+			TotalFileSize = filesize,
+			ChunkSize = chunksize,
+			NumberOfChunks = (int)num_chunks,
+			DownloadChunks = chunks.ToImmutableArray()
+		};
+	}
 
+	public static string FormatBytes(int number_of_bytes) => FormatBytes((double)number_of_bytes);
+	public static string FormatBytes(long number_of_bytes) => FormatBytes((double)number_of_bytes);
 	public static string FormatBytes(double number_of_bytes)
 	{
 		number_of_bytes = Math.Round(number_of_bytes, 2);
