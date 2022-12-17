@@ -9,6 +9,7 @@ using static BDSM.Configuration;
 namespace BDSM;
 public static class FTPFunctions
 {
+	private static readonly ConcurrentDictionary<int, bool> ScanQueueWaitStatus = new();
 	public static FtpConfig SideloaderConfig => new()
 	{
 		EncryptionMode = FtpEncryptionMode.Auto,
@@ -23,31 +24,51 @@ public static class FTPFunctions
 		client.Connect();
 		return client;
 	}
-	public static ConcurrentBag<PathMapping> GetFilesOnServerIgnoreErrors(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo) => GetFilesOnServer(ref pathmaps, repoinfo).PathMappings;
-	public static (ConcurrentBag<PathMapping> PathMappings, ImmutableList<string> MissedFTPEntries) GetFilesOnServer(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo)
+	public static ConcurrentBag<PathMapping> GetFilesOnServerIgnoreErrors(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo, CancellationToken ct) => GetFilesOnServer(ref pathmaps, repoinfo, ct).PathMappings;
+	public static (ConcurrentBag<PathMapping> PathMappings, ImmutableList<string> MissedFTPEntries) GetFilesOnServer(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo, CancellationToken ct)
 	{
+		int tid = Environment.CurrentManagedThreadId;
+		ScanQueueWaitStatus[tid] = false;
+		bool should_wait_for_queue = true;
+		if (ct.IsCancellationRequested)
+			return (new(), ImmutableList<string>.Empty);
+		ConcurrentBag<PathMapping> files = new();
+		PathMapping pathmap = default;
+		List<string> missed_ftp_entries = new();
+		FtpException? last_ftp_exception = null;
+		List<Exception> accumulated_exceptions = new();
 		using FtpClient scanclient = SetupFTPClient(repoinfo);
 		scanclient.Connect();
-		int times_waited = 0;
-		ConcurrentBag<PathMapping> files = new();
-		List<string> missed_ftp_entries = new();
-		while (true)
+
+		void Cleanup() { scanclient.Disconnect(); scanclient.Dispose(); }
+		void ErrorOut(Exception ex) { Cleanup(); throw ex; }
+		(ConcurrentBag<PathMapping> files, ImmutableList<string> missed_ftp_entries) ExitGracefully() { Cleanup(); return (files, missed_ftp_entries.ToImmutableList()); }
+		bool retrying_scan = false;
+		Stopwatch waiting_timer = new();
+		while (!ct.IsCancellationRequested)
 		{
-			if (!pathmaps.TryTake(out PathMapping pathmap))
+			ScanQueueWaitStatus[tid] = false;
+			if (accumulated_exceptions.Count > 2)
+				ErrorOut(new AggregateException(accumulated_exceptions));
+			if (!retrying_scan)
 			{
-				Thread.Sleep(50);
-				times_waited++;
-				if (times_waited > 10)
+				if (!pathmaps.TryTake(out pathmap))
+				{
+					ScanQueueWaitStatus[tid] = true;
+					should_wait_for_queue = ScanQueueWaitStatus.Values.Count(waiting => waiting) != ScanQueueWaitStatus.Count;
+					if (should_wait_for_queue)
+						continue;
 					break;
-				continue;
+				}
 			}
+			ScanQueueWaitStatus[tid] = false;
 			string remotepath = pathmap.RemoteFullPath;
 			string localpath = pathmap.LocalFullPath;
-			times_waited = 0;
 			PathMapping _pathmap;
 			FtpListItem[]? _scanned_files = null;
 			FtpListItem[] scanned_files;
 			int scan_attempts = 0;
+			ct.ThrowIfCancellationRequested();
 			try { _scanned_files = scanclient.GetListing(remotepath); }
 			catch (IOException)
 			{
@@ -56,6 +77,14 @@ public static class FTPFunctions
 				if (scan_attempts < 3)
 					_scanned_files = null;
 			}
+			catch (FtpException ex) when (ex.Message != last_ftp_exception?.Message)
+			{
+				accumulated_exceptions.Add(ex);
+				retrying_scan = true;
+				continue;
+			}
+			accumulated_exceptions.Clear();
+			retrying_scan = false;
 			if (_scanned_files is null)
 			{
 				missed_ftp_entries.Add(remotepath);
@@ -77,9 +106,23 @@ public static class FTPFunctions
 						break;
 				}
 		}
-		scanclient.Dispose();
-		return (files, missed_ftp_entries.ToImmutableList());
+		Console.WriteLine(waiting_timer.ElapsedMilliseconds);
+		ct.ThrowIfCancellationRequested();
+		return ExitGracefully();
 	}
+	public static List<string> SanityCheckBaseDirectories(IEnumerable<PathMapping> entries_to_check, RepoConnectionInfo repoinfo)
+	{
+		List<string> bad_entries = new();
+		using FtpClient sanity_client = SetupFTPClient(repoinfo);
+		sanity_client.Connect();
+		foreach (PathMapping entry in entries_to_check)
+			if (!sanity_client.FileExists(entry.RemoteFullPath))
+				bad_entries.Add(entry.RemoteFullPath);
+		sanity_client.Disconnect();
+		sanity_client.Dispose();
+		return bad_entries;
+	}
+
 	public static void DownloadFileChunk(RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, Action<ChunkDownloadProgressInformation, string> reportprogress)
 	{
 		byte[] buffer = new byte[65536];

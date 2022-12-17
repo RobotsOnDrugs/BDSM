@@ -14,6 +14,7 @@ using YamlDotNet.Serialization;
 using static BDSM.Configuration;
 using static BDSM.FTPFunctions;
 using static BDSM.UtilityFunctions;
+using static BDSM.Exceptions;
 
 namespace BDSM;
 
@@ -63,8 +64,9 @@ public static partial class BDSM
 		UserConfiguration? _config = null;
 
 		const string UserConfigurationFilename = "UserConfiguration.yaml";
+#if DEBUG
 		const string SkipScanConfigurationFilename = "SkipScan.yaml";
-
+#endif
 		static string ReadConfigAndDispose(string filename) { using StreamReader reader = File.OpenText(filename); return reader.ReadToEnd(); }
 		try { _config = new Deserializer().Deserialize<UserConfiguration>(ReadConfigAndDispose(UserConfigurationFilename)); }
 		catch (TypeInitializationException ex)
@@ -93,7 +95,7 @@ public static partial class BDSM
 			return 1;
 		}
 
-		ImmutableHashSet<PathMapping> BaseDirectoriesToScan;
+		ImmutableList<PathMapping> BaseDirectoriesToScan;
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
 		ConcurrentDictionary<string, PathMapping> FilesOnServer = new();
 		ConcurrentBag<FileDownload> FilesToDownload = new();
@@ -120,7 +122,7 @@ public static partial class BDSM
 #endif
 		if (!SkipScan)
 		{
-			try { BaseDirectoriesToScan = GetPathMappingsFromUserConfig(UserConfig).ToImmutableHashSet(); }
+			try { BaseDirectoriesToScan = GetPathMappingsFromUserConfig(UserConfig).ToImmutableList(); }
 			catch (FormatException)
 			{
 				logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
@@ -131,31 +133,70 @@ public static partial class BDSM
 				DirectoriesToScan.Add(mapping);
 		}
 		else
-			BaseDirectoriesToScan = ImmutableHashSet.Create<PathMapping>();
+			BaseDirectoriesToScan = ImmutableList.Create<PathMapping>();
 
 		Stopwatch OpTimer = new();
-		Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>[] scan_tasks = new Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>[UserConfig.ConnectionInfo.MaxConnections];
+		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> scan_tasks = new();
+		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> finished_scan_tasks = new();
 
 		logger.Info("Scanning the server.");
 		OpTimer.Start();
+		List<string> bad_entries = SanityCheckBaseDirectories(BaseDirectoriesToScan, UserConfig.ConnectionInfo);
+		if (bad_entries.Count > 0)
+		{
+			foreach (string bad_entry in bad_entries)
+				logger.Error($"'{bad_entry}' does not exist on the server. Are your remote paths configured correctly?");
+			OpTimer.Stop();
+			if (UserConfig.PromptToContinue)
+				PromptBeforeExit();
+			return 1;
+		}
+
+		List<AggregateException> scan_exceptions = new();
+		using CancellationTokenSource scan_cts = new();
+		CancellationToken scan_ct = scan_cts.Token;
 
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-			scan_tasks[i] = Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo));
-		try { Task.WaitAll(scan_tasks); }
+			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct), scan_ct));
+		try
+		{
+			while (scan_tasks.Count != 0)
+			{
+				int completed_task_idx = Task.WaitAny(scan_tasks.ToArray());
+				Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)> completed_task = scan_tasks[completed_task_idx];
+				switch (completed_task.Status)
+				{
+					case TaskStatus.RanToCompletion or TaskStatus.Canceled:
+						break;
+					case TaskStatus.Faulted:
+						scan_cts.Cancel();
+						scan_exceptions.Add(completed_task.Exception!);
+						break;
+					default:
+						scan_exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing scan task exceptions.")));
+						break;
+				}
+				finished_scan_tasks.Add(completed_task);
+				scan_tasks.RemoveAt(completed_task_idx);
+			}
+			if (scan_exceptions.Count > 0)
+				throw new AggregateException(scan_exceptions);
+		}
 		catch (AggregateException ex)
 		{
 			logger.Error("Could not scan the server. Failed scan tasks had the following errors:");
-			foreach (Exception exception in ex.InnerExceptions)
+			foreach (Exception inner_ex in ex.Flatten().InnerExceptions)
 			{
-				logger.Error(exception.Message);
-				logger.Error(exception.StackTrace);
+				logger.Error(inner_ex.Message);
+				logger.Error(inner_ex.StackTrace);
 			}
-			logger.Error("Please file a bug report and provide this information. https://github.com/RobotsOnDrugs/BDSM/issues");
+			if (UserConfig.PromptToContinue)
+				PromptUserToContinue();
 			return 1;
 		}
 		bool missed_some_files = false;
 		ConcurrentBag<string> missed_files = new();
-		foreach ((ConcurrentBag<PathMapping> pathmaps, ImmutableList<string> missed_ftp_entries) in scan_tasks.Select(task => task.Result))
+		foreach ((ConcurrentBag<PathMapping> pathmaps, ImmutableList<string> missed_ftp_entries) in finished_scan_tasks.Select(task => task.Result))
 		{
 			foreach (PathMapping pathmap in pathmaps)
 				FilesOnServer.TryAdd(pathmap.LocalFullPathLower, pathmap);
@@ -163,6 +204,8 @@ public static partial class BDSM
 			foreach (string missed_ftp_entry in missed_ftp_entries)
 				missed_files.Add(missed_ftp_entry);
 		}
+		foreach (Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)> finished_scan_task in finished_scan_tasks)
+			finished_scan_task.Dispose();
 		if (FilesOnServer.IsEmpty && !DirectoriesToScan.IsEmpty)
 		{
 			logger.Error("No files could be scanned due to network or other errors.");
@@ -220,7 +263,10 @@ public static partial class BDSM
 			foreach (FileInfo pm in FilesToDelete)
 				logger.Info($"{pm.FullName}");
 			if (UserConfig.PromptToContinue)
+			{
+				logger.Info($"{Pluralize(FilesToDelete.Count, " file")} marked for deletion.");
 				PromptUserToContinue();
+			}
 			foreach (FileInfo pm in FilesToDelete)
 			{
 				try { File.Delete(pm.FullName); }
