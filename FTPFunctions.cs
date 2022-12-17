@@ -44,7 +44,6 @@ public static class FTPFunctions
 		void ErrorOut(Exception ex) { Cleanup(); throw ex; }
 		(ConcurrentBag<PathMapping> files, ImmutableList<string> missed_ftp_entries) ExitGracefully() { Cleanup(); return (files, missed_ftp_entries.ToImmutableList()); }
 		bool retrying_scan = false;
-		Stopwatch waiting_timer = new();
 		while (!ct.IsCancellationRequested)
 		{
 			ScanQueueWaitStatus[tid] = false;
@@ -106,7 +105,6 @@ public static class FTPFunctions
 						break;
 				}
 		}
-		Console.WriteLine(waiting_timer.ElapsedMilliseconds);
 		ct.ThrowIfCancellationRequested();
 		return ExitGracefully();
 	}
