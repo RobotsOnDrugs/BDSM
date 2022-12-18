@@ -57,7 +57,7 @@ public static class UtilityFunctions
 		long num_chunks = full_chunks + ((remaining_bytes > 0) ? 1 : 0);
 		for (int i = 0; i < num_chunks; i++)
 		{
-			int _offset = i * chunksize;
+			long _offset = i * (long)chunksize;
 			long _remaining = filesize - _offset;
 			int _length = (_remaining > chunksize) ? chunksize : (int)_remaining;
 			DownloadChunk chunk = new()
