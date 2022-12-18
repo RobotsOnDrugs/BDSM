@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Diagnostics;
 
 using ShellProgressBar;
@@ -59,8 +58,8 @@ public record FileDownloadProgressInformation
 	{
 		if (IsInitialized) return;
 		TotalTimeStopwatch.Start();
-		FileProgressBar = BDSM.TotalProgressBar.Spawn((int)(TotalFileSize / 1024), $"{FilePath} | Awaiting download", BDSM.DefaultChildProgressBarOptions);
-		CurrentSpeedUpdater = BDSM.TrackCurrentSpeed(this);
+		FileProgressBar = DownloadProgress.TotalProgressBar.Spawn((int)(TotalFileSize / 1024), $"{FilePath} | Awaiting download", DownloadProgress.DefaultChildProgressBarOptions);
+		CurrentSpeedUpdater = DownloadProgress.TrackCurrentSpeed(this);
 		IsInitialized = true;
 	}
 	public void Complete()

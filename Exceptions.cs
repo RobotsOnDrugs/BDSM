@@ -9,18 +9,6 @@ public record Exceptions
 		public BDSMInternalFaultException(string? message, bool include_bug_report_link) : base(message + (include_bug_report_link ? "" : BugReportSuffix)) { }
 		public BDSMInternalFaultException(string? message, Exception? innerException) : base(message, innerException) { }
 	}
-	public class ConfigurationException : Exception
-	{
-		public ConfigurationException() { }
-		public ConfigurationException(string? message) : base(message) { }
-		public ConfigurationException(string? message, Exception? innerException) : base(message, innerException) { }
-	}
-	public class UserConfigurationException : ConfigurationException
-	{
-		public UserConfigurationException() {  }
-		public UserConfigurationException(string? message) : base(message) { }
-		public UserConfigurationException(string? message, Exception? innerException) : base(message, innerException) { }
-	}
 	public class FTPOperationException : Exception
 	{
 		public FTPOperationException() { }

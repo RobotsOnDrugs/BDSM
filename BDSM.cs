@@ -7,12 +7,10 @@ using FluentFTP;
 
 using NLog;
 
-using ShellProgressBar;
-
 using YamlDotNet.Serialization;
 
-using static BDSM.Configuration;
 using static BDSM.FTPFunctions;
+using static BDSM.DownloadProgress;
 using static BDSM.UtilityFunctions;
 using static BDSM.Exceptions;
 
@@ -27,67 +25,13 @@ public static partial class BDSM
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleCP(uint wCodePageID);
 
-	private static readonly ILogger logger = LogManager.GetCurrentClassLogger();
-	internal static ProgressBar TotalProgressBar = null!;
-	public static readonly ProgressBarOptions DefaultTotalProgressBarOptions = new()
-	{
-		CollapseWhenFinished = true,
-		DisplayTimeInRealTime = true,
-		EnableTaskBarProgress = true,
-		ProgressCharacter = ' '
-	};
-	public static readonly ProgressBarOptions DefaultChildProgressBarOptions = new()
-	{
-		CollapseWhenFinished = true,
-		ShowEstimatedDuration = true,
-		DisplayTimeInRealTime = true,
-		ProgressBarOnBottom = true,
-		ProgressCharacter = '─',
-	};
-	private static int NumberOfFilesToDownload = 0;
-	private static int TotalNumberOfFilesToDownload = 0;
-	private static long TotalBytesToDownload = 0;
-	private static long TotalBytesDownloaded = 0;
-	private static double TotalCurrentSpeed = 0;
-	private static string TotalCurrentSpeedString => FormatBytes(TotalCurrentSpeed) + "/s";
-	private static readonly ConcurrentDictionary<string, FileDownloadProgressInformation> FileDownloadsInformation = new();
-	private static readonly Stopwatch DownloadSpeedStopwatch = new();
-	public static double TotalDownloadSpeed => DownloadSpeedStopwatch.Elapsed.TotalSeconds == 0 ? TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds : 0;
-	public static string TotalDownloadSpeedString => FormatBytes(TotalDownloadSpeed) + "/s";
-
 	public static async Task<int> Main()
 	{
+		ILogger logger = LogManager.GetCurrentClassLogger();
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
 
-		Exception? _config_ex = null;
-		UserConfiguration? _config = null;
-
-		const string UserConfigurationFilename = "UserConfiguration.yaml";
-#if DEBUG
-		const string SkipScanConfigurationFilename = "SkipScan.yaml";
-#endif
-		static string ReadConfigAndDispose(string filename) { using StreamReader reader = File.OpenText(filename); return reader.ReadToEnd(); }
-		try { _config = new Deserializer().Deserialize<UserConfiguration>(ReadConfigAndDispose(UserConfigurationFilename)); }
-		catch (TypeInitializationException ex)
-		{
-			if (ex.InnerException is FileNotFoundException)
-				logger.Error("Your configuration file is missing. Please read the documentation and copy the example configuration to your own UserConfiguration.yaml.");
-			else
-				logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
-			_config_ex = ex;
-		}
-		catch (Exception ex) { _config_ex = ex; }
-		if (_config_ex is not null)
-		{
-			logger.Error(_config_ex.StackTrace);
-			logger.Error(_config_ex.Message);
-			logger.Error("Could not load configuration file. Aborting.");
-			PromptBeforeExit();
-			return 1;
-		}
-		UserConfiguration UserConfig = (UserConfiguration)_config!;
-		logger.Info("Configuration loaded.");
+		Configuration.UserConfiguration UserConfig = await Configuration.GetUserConfigurationAsync();
 		if (UserConfig.GamePath == @"X:\Your HoneySelect 2 DX folder here\")
 		{
 			logger.Error("Your mod directory has not been set.");
@@ -95,6 +39,7 @@ public static partial class BDSM
 			return 1;
 		}
 
+		logger.Info("Configuration loaded.");
 		ImmutableList<PathMapping> BaseDirectoriesToScan;
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
 		ConcurrentDictionary<string, PathMapping> FilesOnServer = new();
@@ -103,8 +48,8 @@ public static partial class BDSM
 
 		bool SkipScan = false;
 #if DEBUG
-		SkipScanConfiguration _skip_config = File.Exists(SkipScanConfigurationFilename)
-			? new Deserializer().Deserialize<SkipScanConfiguration>(ReadConfigAndDispose(SkipScanConfigurationFilename))
+		SkipScanConfiguration _skip_config = File.Exists(Configuration.SkipScanConfigurationFilename)
+			? new Deserializer().Deserialize<SkipScanConfiguration>(Configuration.ReadConfigAndDispose(Configuration.SkipScanConfigurationFilename))
 			: new() { SkipScan = false, FileMappings = Array.Empty<string>() };
 		SkipScan = _skip_config.SkipScan;
 
@@ -368,25 +313,5 @@ public static partial class BDSM
 			TotalProgressBar.Tick((int)(TotalBytesDownloaded / 1024));
 			TotalProgressBar.Message = $"Downloading files ({downloads_finished} done / {downloads_in_progress} in progress / {downloads_in_queue} remaining): {FormatBytes(TotalBytesDownloaded)} / {FormatBytes(TotalBytesToDownload)} (Current speed: {TotalCurrentSpeedString}) (Average speed: {FormatBytes(TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
 		}
-	}
-	public static async Task TrackCurrentSpeed(FileDownloadProgressInformation file_download_progress)
-	{
-		while (file_download_progress.TotalBytesDownloaded < file_download_progress.TotalFileSize)
-		{
-			file_download_progress.PreviousBytesDownloaded = file_download_progress.TotalBytesDownloaded;
-			await Task.Delay(2000);
-			file_download_progress.CurrentSpeed = Math.Round((double)((file_download_progress.TotalBytesDownloaded - file_download_progress.PreviousBytesDownloaded) / 2), 2);
-		}
-		file_download_progress.CurrentSpeed = 0;
-	}
-	public static async Task TrackTotalCurrentSpeed()
-	{
-		while (NumberOfFilesToDownload > 0)
-		{
-			long previous_bytes_downloaded = TotalBytesDownloaded;
-			await Task.Delay(2000);
-			TotalCurrentSpeed = Math.Round((double)((TotalBytesDownloaded - previous_bytes_downloaded) / 2), 2);
-		}
-		TotalCurrentSpeed = 0;
 	}
 }

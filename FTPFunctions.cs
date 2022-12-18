@@ -4,8 +4,6 @@ using System.Diagnostics;
 using System.Text;
 using FluentFTP;
 
-using static BDSM.Configuration;
-
 namespace BDSM;
 public static class FTPFunctions
 {
@@ -16,16 +14,16 @@ public static class FTPFunctions
 		ValidateAnyCertificate = true,
 		LogToConsole = false,
 	};
-	public static FtpClient DefaultSideloaderClient(RepoConnectionInfo repoinfo) =>
+	public static FtpClient DefaultSideloaderClient(Configuration.RepoConnectionInfo repoinfo) =>
 		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = SideloaderConfig, Encoding = Encoding.UTF8 };
-	public static FtpClient SetupFTPClient(RepoConnectionInfo repoinfo)
+	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo)
 	{
 		FtpClient client = DefaultSideloaderClient(repoinfo);
 		client.Connect();
 		return client;
 	}
-	public static ConcurrentBag<PathMapping> GetFilesOnServerIgnoreErrors(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo, CancellationToken ct) => GetFilesOnServer(ref pathmaps, repoinfo, ct).PathMappings;
-	public static (ConcurrentBag<PathMapping> PathMappings, ImmutableList<string> MissedFTPEntries) GetFilesOnServer(ref ConcurrentBag<PathMapping> pathmaps, RepoConnectionInfo repoinfo, CancellationToken ct)
+	public static ConcurrentBag<PathMapping> GetFilesOnServerIgnoreErrors(ref ConcurrentBag<PathMapping> pathmaps, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct) => GetFilesOnServer(ref pathmaps, repoinfo, ct).PathMappings;
+	public static (ConcurrentBag<PathMapping> PathMappings, ImmutableList<string> MissedFTPEntries) GetFilesOnServer(ref ConcurrentBag<PathMapping> pathmaps, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct)
 	{
 		int tid = Environment.CurrentManagedThreadId;
 		ScanQueueWaitStatus[tid] = false;
@@ -108,7 +106,7 @@ public static class FTPFunctions
 		ct.ThrowIfCancellationRequested();
 		return ExitGracefully();
 	}
-	public static List<string> SanityCheckBaseDirectories(IEnumerable<PathMapping> entries_to_check, RepoConnectionInfo repoinfo)
+	public static List<string> SanityCheckBaseDirectories(IEnumerable<PathMapping> entries_to_check, Configuration.RepoConnectionInfo repoinfo)
 	{
 		List<string> bad_entries = new();
 		using FtpClient sanity_client = SetupFTPClient(repoinfo);
@@ -121,7 +119,7 @@ public static class FTPFunctions
 		return bad_entries;
 	}
 
-	public static void DownloadFileChunk(RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, Action<ChunkDownloadProgressInformation, string> reportprogress)
+	public static void DownloadFileChunk(Configuration.RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, Action<ChunkDownloadProgressInformation, string> reportprogress)
 	{
 		byte[] buffer = new byte[65536];
 		FileStream local_filestream = null!;
