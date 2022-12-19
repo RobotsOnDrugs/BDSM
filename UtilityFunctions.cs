@@ -7,28 +7,6 @@ namespace BDSM;
 
 public static class UtilityFunctions
 {
-	public static ConcurrentBag<PathMapping> GetPathMappingsFromUserConfig(UserConfiguration userconfig)
-	{
-		ConcurrentBag<PathMapping> _pathmappings = new();
-		foreach (string sideloaderdir in userconfig.BaseSideloaderDirectories)
-		{
-			string[] _sideloadersplit = sideloaderdir.Split(" | ");
-			bool _deletefiles = bool.Parse(_sideloadersplit[2]);
-			PathMapping _pathmap = new()
-			{
-				RootPath = userconfig.ConnectionInfo.RootPath,
-				RemoteRelativePath = _sideloadersplit[0],
-				GamePath = userconfig.GamePath,
-				LocalRelativePath = _sideloadersplit[1],
-				FileSize = null,
-				DeleteClientFiles = _deletefiles
-			};
-			if (!new DirectoryInfo(_pathmap.LocalFullPath).Exists)
-				_ = Directory.CreateDirectory(_pathmap.LocalFullPath);
-			_pathmappings.Add(_pathmap);
-		}
-		return _pathmappings;
-	}
 	public static ConcurrentBag<PathMapping> GetPathMappingsFromSkipScanConfig(SkipScanConfiguration config, UserConfiguration userconfig)
 	{
 		ConcurrentBag<PathMapping> _mappings = new();

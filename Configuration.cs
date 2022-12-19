@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 
 using YamlDotNet.Serialization;
@@ -5,8 +6,23 @@ using YamlDotNet.Serialization;
 namespace BDSM;
 public record Configuration
 {
-	public const string UserConfigurationFilename = "UserConfiguration.yaml";
-	public const string SkipScanConfigurationFilename = "SkipScan.yaml";
+	internal const string USER_CONFIG_FILENAME = "UserConfiguration.yaml";
+	internal const bool USE_OLD_CONFIG = true;
+
+	public readonly record struct OldUserConfiguration
+	{
+		public required string GamePath { get; init; }
+		public required RepoConnectionInfo ConnectionInfo { get; init; }
+		public required bool PromptToContinue { get; init; }
+		public required string[] BaseSideloaderDirectories { get; init; }
+	}
+	public readonly record struct UserConfiguration
+	{
+		public required string GamePath { get; init; }
+		public required RepoConnectionInfo ConnectionInfo { get; init; }
+		public required ImmutableHashSet<PathMapping> BasePathMappings { get; init; }
+		public required bool PromptToContinue { get; init; }
+	}
 	public readonly record struct RepoConnectionInfo
 	{
 		public required string Address { get; init; }
@@ -18,31 +34,71 @@ public record Configuration
 		public required string RootPath { get; init; }
 		public required int MaxConnections { get; init; }
 	}
-	public readonly record struct UserConfiguration
+	public readonly record struct ModpackDefinition
 	{
-		public required string GamePath { get; init; }
-		public required RepoConnectionInfo ConnectionInfo { get; init; }
-		public required bool PromptToContinue { get; init; }
-		public required string[] BaseSideloaderDirectories { get; init; }
+		public required string Name { get; init; }
+		public required string RemoteRelativePath { get; init; }
+		public required string LocalRelativePath { get; init; }
+		public required bool DeleteClientFiles { get; init; }
 	}
-	public static string ReadConfigAndDispose(string filename) => ReadConfigAndDisposeAsync(filename).Result;
+	public static string ReadConfigAndDispose(string filename) { using StreamReader reader = File.OpenText(filename); return reader.ReadToEnd(); }
 	public static async Task<string> ReadConfigAndDisposeAsync(string filename) { using StreamReader reader = File.OpenText(filename); return await reader.ReadToEndAsync(); }
 	public static async Task<UserConfiguration> GetUserConfigurationAsync()
 	{
-		UserConfiguration _config;
-		try { _config = new Deserializer().Deserialize<UserConfiguration>(await ReadConfigAndDisposeAsync(UserConfigurationFilename)); }
+		Deserializer yaml_deserializer = new();
+
+		OldUserConfiguration old_config;
+		try { old_config = yaml_deserializer.Deserialize<OldUserConfiguration>(await ReadConfigAndDisposeAsync(USER_CONFIG_FILENAME)); }
 		catch (Exception ex)
 		{
 			string ucex_message = ex switch
 			{
 				TypeInitializationException when ex.InnerException is FileNotFoundException => "Your configuration file is missing. Please read the documentation and copy the example configuration to your own UserConfiguration.yaml.",
 				TypeInitializationException => "Your configuration file is malformed. Please reference the example and read the documentation.",
-				_ => "Unspecified error loading configuration."
+				_ => "Unspecified error loading user configuration."
 			};
-		throw new UserConfigurationException(ucex_message, ex);
+			throw new UserConfigurationException(ucex_message, ex);
 		}
-		return _config;
+
+		return new()
+		{
+			GamePath = old_config.GamePath,
+			ConnectionInfo = BetterRepackRepositoryDefinitions.DefaultConnectionInfo,
+			PromptToContinue = old_config.PromptToContinue,
+			BasePathMappings = GetPathMappingsFromOldUserConfig(old_config)
+		};
 	}
+	public static ImmutableHashSet<PathMapping> GetPathMappingsFromOldUserConfig(OldUserConfiguration userconfig)
+	{
+		ImmutableHashSet<PathMapping>.Builder _pathmapping_builder = ImmutableHashSet.CreateBuilder<PathMapping>();
+		foreach (string sideloaderdir in userconfig.BaseSideloaderDirectories)
+		{
+			string[] _sideloadersplit = sideloaderdir.Split(" | ");
+			bool _deletefiles = bool.Parse(_sideloadersplit[2]);
+			PathMapping _pathmap = new()
+			{
+				RootPath = userconfig.ConnectionInfo.RootPath,
+				RemoteRelativePath = _sideloadersplit[0],
+				GamePath = userconfig.GamePath,
+				LocalRelativePath = _sideloadersplit[1],
+				FileSize = null,
+				DeleteClientFiles = _deletefiles
+			};
+			if (!new DirectoryInfo(_pathmap.LocalFullPath).Exists)
+				_ = Directory.CreateDirectory(_pathmap.LocalFullPath);
+			_ = _pathmapping_builder.Add(_pathmap);
+		}
+		return _pathmapping_builder.ToImmutableHashSet();
+	}
+	public static PathMapping ModpackDefinitionToPathMapping(ModpackDefinition definition, string gamepath, string rootpath) => new()
+		{
+			RootPath = rootpath,
+			RemoteRelativePath = definition.RemoteRelativePath,
+			GamePath = gamepath,
+			LocalRelativePath = definition.LocalRelativePath,
+			FileSize = null,
+			DeleteClientFiles = definition.DeleteClientFiles
+		};
 	public class ConfigurationException : Exception
 	{
 		public ConfigurationException() { }

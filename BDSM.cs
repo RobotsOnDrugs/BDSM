@@ -27,6 +27,7 @@ public static partial class BDSM
 
 	public static async Task<int> Main()
 	{
+		const string SKIP_SCAN_CONFIG_FILENAME = "SkipScan.yaml";
 		ILogger logger = LogManager.GetCurrentClassLogger();
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
@@ -39,8 +40,7 @@ public static partial class BDSM
 			return 1;
 		}
 
-		logger.Info("Configuration loaded.");
-		ImmutableList<PathMapping> BaseDirectoriesToScan;
+		ImmutableHashSet<PathMapping> BaseDirectoriesToScan;
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
 		ConcurrentDictionary<string, PathMapping> FilesOnServer = new();
 		ConcurrentBag<FileDownload> FilesToDownload = new();
@@ -48,8 +48,8 @@ public static partial class BDSM
 
 		bool SkipScan = false;
 #if DEBUG
-		SkipScanConfiguration _skip_config = File.Exists(Configuration.SkipScanConfigurationFilename)
-			? new Deserializer().Deserialize<SkipScanConfiguration>(Configuration.ReadConfigAndDispose(Configuration.SkipScanConfigurationFilename))
+		SkipScanConfiguration _skip_config = File.Exists(SKIP_SCAN_CONFIG_FILENAME)
+			? new Deserializer().Deserialize<SkipScanConfiguration>(Configuration.ReadConfigAndDispose(SKIP_SCAN_CONFIG_FILENAME))
 			: new() { SkipScan = false, FileMappings = Array.Empty<string>() };
 		SkipScan = _skip_config.SkipScan;
 
@@ -65,9 +65,11 @@ public static partial class BDSM
 			_scanner.Dispose();
 		}
 #endif
-		if (!SkipScan)
+		if (SkipScan)
+			BaseDirectoriesToScan = ImmutableHashSet<PathMapping>.Empty;
+		else
 		{
-			try { BaseDirectoriesToScan = GetPathMappingsFromUserConfig(UserConfig).ToImmutableList(); }
+			try { BaseDirectoriesToScan = UserConfig.BasePathMappings; }
 			catch (FormatException)
 			{
 				logger.Error("Your configuration file is malformed. Please reference the example and read the documentation.");
@@ -77,8 +79,6 @@ public static partial class BDSM
 			foreach (PathMapping mapping in BaseDirectoriesToScan)
 				DirectoriesToScan.Add(mapping);
 		}
-		else
-			BaseDirectoriesToScan = ImmutableList.Create<PathMapping>();
 
 		Stopwatch OpTimer = new();
 		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> scan_tasks = new();
@@ -100,7 +100,6 @@ public static partial class BDSM
 		List<AggregateException> scan_exceptions = new();
 		using CancellationTokenSource scan_cts = new();
 		CancellationToken scan_ct = scan_cts.Token;
-
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
 			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct), scan_ct));
 		try
@@ -220,7 +219,6 @@ public static partial class BDSM
 					failed_to_delete.Add(pm);
 					failed_deletions.Add(ex);
 					logger.Warn(ex.Message);
-					continue;
 				}
 			}
 			logger.Info($"{Pluralize(FilesToDelete.Count - failed_to_delete.Count, " file")} deleted.");
