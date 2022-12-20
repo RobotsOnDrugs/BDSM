@@ -232,6 +232,9 @@ dotnet_diagnostic.IDE0001.severity = suggestion
 # RCS1211: Remove unnecessary 'else'.
 dotnet_diagnostic.RCS1211.severity = suggestion
 
+# IDE0002: Simplify Member Access
+dotnet_diagnostic.IDE0002.severity = suggestion
+
 [*.{cs,vb}]
 dotnet_style_operator_placement_when_wrapping = beginning_of_line
 tab_width = 4
@@ -242,3 +245,5 @@ dotnet_style_null_propagation = true:suggestion
 dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion
 dotnet_style_prefer_auto_properties = true:suggestion
 dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_prefer_simplified_boolean_expressions = true:suggestion

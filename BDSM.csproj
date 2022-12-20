@@ -29,7 +29,7 @@
 	<PackageReference Include="FluentFTP" Version="42.1.0" />
 	<PackageReference Include="NLog" Version="5.1.0" />
 	<PackageReference Include="ShellProgressBar" Version="5.2.0" />
-	<PackageReference Include="YamlDotNet" Version="12.2.1" />
+	<PackageReference Include="YamlDotNet" Version="12.3.1" />
   </ItemGroup>
 
   <ItemGroup>

@@ -42,10 +42,10 @@ public record FileDownloadProgressInformation
 	public TimeSpan TotalTimeElapsed => TotalTimeStopwatch.Elapsed;
 	public long CurrentBytesDownloaded { get; set; } = 0;
 	public TimeSpan CurrentTimeElapsed { get; set; } = new TimeSpan();
-	public double CurrentSpeed { get; set; }
+	public double CurrentSpeed { get; private set; }
 	public string CurrentSpeedString => UtilityFunctions.FormatBytes(CurrentSpeed) + "/s";
-	public long PreviousBytesDownloaded { get; set; } = 0;
-	public Task CurrentSpeedUpdater { get; private set; } = null!;
+	public Stopwatch ProgressUpdateStopwatch { get; private set; } = new();
+	public long PreviousBytesDownloaded { get; private set; } = 0;
 	public required long TotalFileSize { get; init; }
 	public string TotalFileSizeString => UtilityFunctions.FormatBytes(TotalFileSize);
 	public ChildProgressBar FileProgressBar { get; private set; } = null!;
@@ -54,12 +54,23 @@ public record FileDownloadProgressInformation
 	public bool IsInitialized { get; private set; } = false;
 	public bool IsComplete { get; private set; } = false;
 
+	private void TrackCurrentSpeed()
+	{
+		while (TotalBytesDownloaded < TotalFileSize)
+		{
+			PreviousBytesDownloaded = TotalBytesDownloaded;
+			Thread.Sleep(1000);
+			CurrentSpeed = Math.Round((double)(TotalBytesDownloaded - PreviousBytesDownloaded), 2);
+		}
+		CurrentSpeed = 0;
+	}
 	public void Initialize()
 	{
 		if (IsInitialized) return;
 		TotalTimeStopwatch.Start();
 		FileProgressBar = DownloadProgress.TotalProgressBar.Spawn((int)(TotalFileSize / 1024), $"{FilePath} | Awaiting download", DownloadProgress.DefaultChildProgressBarOptions);
-		CurrentSpeedUpdater = DownloadProgress.TrackCurrentSpeed(this);
+		ProgressUpdateStopwatch.Start();
+		_ = Task.Run(TrackCurrentSpeed);
 		IsInitialized = true;
 	}
 	public void Complete()
@@ -67,6 +78,7 @@ public record FileDownloadProgressInformation
 		FileInfo downloaded_file = new(FilePath);
 		Debug.Assert(downloaded_file.Length == TotalFileSize);
 		TotalTimeStopwatch.Stop();
+		ProgressUpdateStopwatch.Stop();
 		FileProgressBar.Dispose();
 		IsComplete = true;
 	}

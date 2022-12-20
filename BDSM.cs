@@ -229,6 +229,7 @@ public static partial class BDSM
 				throw new AggregateException(failed_deletions);
 			}
 		}
+
 		if (!FilesToDownload.IsEmpty)
 		{
 			TotalNumberOfFilesToDownload = FilesToDownload.Count;
@@ -241,7 +242,7 @@ public static partial class BDSM
 				PromptUserToContinue();
 
 			OpTimer.Restart();
-			_ = TrackTotalCurrentSpeed();
+			TrackTotalCurrentSpeed();
 			TotalProgressBar = new((int)(TotalBytesToDownload / 1024), "Downloading files:", DefaultTotalProgressBarOptions);
 			ConcurrentQueue<DownloadChunk> chunks = new();
 			while (FilesToDownload.TryTake(out FileDownload current_file_download))
@@ -277,39 +278,5 @@ public static partial class BDSM
 		if (UserConfig.PromptToContinue)
 			PromptUserToContinue();
 		return 0;
-	}
-	public static void ReportProgress(ChunkDownloadProgressInformation progressinfo, string filepath)
-	{
-		lock (FileDownloadsInformation)
-		{
-			FileDownloadsInformation[filepath].Initialize();
-			FileDownloadsInformation[filepath].TotalBytesDownloaded += progressinfo.BytesDownloaded;
-			string file_progress_message = $"{Path.GetFileName(filepath)} | {FileDownloadsInformation[filepath].TotalBytesDownloadedString} / {FileDownloadsInformation[filepath].TotalFileSizeString} (Current speed: {FileDownloadsInformation[filepath].CurrentSpeedString})";
-			if (FileDownloadsInformation[filepath].TotalBytesDownloaded == FileDownloadsInformation[filepath].TotalFileSize)
-			{
-				Debug.Assert(NumberOfFilesToDownload > 0);
-				_ = Interlocked.Decrement(ref NumberOfFilesToDownload);
-				file_progress_message = "";
-				lock (TotalProgressBar)
-				{
-					FileDownloadsInformation[filepath].FileProgressBar.Dispose();
-					FileDownloadsInformation[filepath].Complete();
-				}
-			}
-			else
-			{
-				FileDownloadsInformation[filepath].FileProgressBar.Message = file_progress_message;
-				FileDownloadsInformation[filepath].FileProgressBar.Tick((int)(FileDownloadsInformation[filepath].TotalBytesDownloaded / 1024), file_progress_message);
-			}
-		}
-		_ = Interlocked.Add(ref TotalBytesDownloaded, progressinfo.BytesDownloaded);
-		int downloads_finished = TotalNumberOfFilesToDownload - NumberOfFilesToDownload;
-		int downloads_in_progress = FileDownloadsInformation.Count(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
-		int downloads_in_queue = FileDownloadsInformation.Count(info => !info.Value.IsInitialized);
-		lock (TotalProgressBar)
-		{
-			TotalProgressBar.Tick((int)(TotalBytesDownloaded / 1024));
-			TotalProgressBar.Message = $"Downloading files ({downloads_finished} done / {downloads_in_progress} in progress / {downloads_in_queue} remaining): {FormatBytes(TotalBytesDownloaded)} / {FormatBytes(TotalBytesToDownload)} (Current speed: {TotalCurrentSpeedString}) (Average speed: {FormatBytes(TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
-		}
 	}
 }

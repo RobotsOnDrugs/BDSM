@@ -62,13 +62,12 @@ public static class UtilityFunctions
 	public static string FormatBytes(long number_of_bytes) => FormatBytes((double)number_of_bytes);
 	public static string FormatBytes(double number_of_bytes)
 	{
-		number_of_bytes = Math.Round(number_of_bytes, 2);
 		return number_of_bytes switch
 		{
-			< 1100 * 1 => $"{number_of_bytes} B",
-			< 1100 * 1024 => $"{Math.Round(number_of_bytes / 1024, 2)} KiB",
-			< 1100 * 1024 * 1024 => $"{Math.Round(number_of_bytes / (1024 * 1024), 2)} MiB",
-			>= 1100 * 1024 * 1024 => $"{Math.Round(number_of_bytes / (1024 * 1024 * 1024), 2)} GiB",
+			< 1100 * 1 => $"{Math.Round(number_of_bytes, 2):N2} B",
+			< 1100 * 1024 => $"{Math.Round(number_of_bytes / 1024, 2):N2} KiB",
+			< 1100 * 1024 * 1024 => $"{Math.Round(number_of_bytes / (1024 * 1024), 2):N2} MiB",
+			>= 1100 * 1024 * 1024 => $"{Math.Round(number_of_bytes / (1024 * 1024 * 1024), 2):N2} GiB",
 			double.NaN => "unknown"
 		};
 	}
