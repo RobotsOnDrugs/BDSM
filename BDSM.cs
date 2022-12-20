@@ -13,11 +13,46 @@ using static BDSM.FTPFunctions;
 using static BDSM.DownloadProgress;
 using static BDSM.UtilityFunctions;
 using static BDSM.Exceptions;
+using System.Collections.Generic;
 
 namespace BDSM;
 
 public static partial class BDSM
 {
+	private static bool CancelRequested = false;
+	private static void CtrlCHandler(object sender, ConsoleCancelEventArgs args)
+	{
+		CancelRequested = true;
+		Console.WriteLine("Ctrl-C caught, cleaning up...");
+		args.Cancel = true;
+	}
+	private static List<Task<T>> ProcessTasks<T>(List<Task<T>> tasks, CancellationTokenSource cts)
+	{
+		List<Task<T>> finished_tasks = new();
+		List<AggregateException> exceptions = new();
+		while (tasks.Count != 0)
+		{
+			int completed_task_idx = Task.WaitAny(tasks.ToArray(), 2000);
+			if (CancelRequested) cts.Cancel();
+			if (completed_task_idx == -1) continue;
+			Task<T> completed_task = tasks[completed_task_idx];
+			switch (completed_task.Status)
+			{
+				case TaskStatus.RanToCompletion or TaskStatus.Canceled:
+					break;
+				case TaskStatus.Faulted:
+					cts.Cancel();
+					exceptions.Add(completed_task.Exception!);
+					break;
+				default:
+					exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing task exceptions.")));
+					break;
+			}
+			finished_tasks.Add(completed_task);
+			tasks.RemoveAt(completed_task_idx);
+		}
+		return exceptions.Count == 0 ? finished_tasks : throw new AggregateException(exceptions);
+	}
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleOutputCP(uint wCodePageID);
@@ -27,6 +62,7 @@ public static partial class BDSM
 
 	public static async Task<int> Main()
 	{
+		Console.CancelKeyPress += CtrlCHandler!;
 		const string SKIP_SCAN_CONFIG_FILENAME = "SkipScan.yaml";
 		ILogger logger = LogManager.GetCurrentClassLogger();
 		_ = SetConsoleOutputCP(65001);
@@ -81,12 +117,11 @@ public static partial class BDSM
 		}
 
 		Stopwatch OpTimer = new();
-		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> scan_tasks = new();
-		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> finished_scan_tasks = new();
 
 		logger.Info("Scanning the server.");
 		OpTimer.Start();
 		List<string> bad_entries = SanityCheckBaseDirectories(BaseDirectoriesToScan, UserConfig.ConnectionInfo);
+		if (CancelRequested) return 1;
 		if (bad_entries.Count > 0)
 		{
 			foreach (string bad_entry in bad_entries)
@@ -97,34 +132,39 @@ public static partial class BDSM
 			return 1;
 		}
 
-		List<AggregateException> scan_exceptions = new();
+		if (CancelRequested) return 1;
+		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> scan_tasks = new();
+		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> finished_scan_tasks = new();
 		using CancellationTokenSource scan_cts = new();
 		CancellationToken scan_ct = scan_cts.Token;
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct), scan_ct));
+			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct)));
 		try
 		{
-			while (scan_tasks.Count != 0)
-			{
-				int completed_task_idx = Task.WaitAny(scan_tasks.ToArray());
-				Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)> completed_task = scan_tasks[completed_task_idx];
-				switch (completed_task.Status)
-				{
-					case TaskStatus.RanToCompletion or TaskStatus.Canceled:
-						break;
-					case TaskStatus.Faulted:
-						scan_cts.Cancel();
-						scan_exceptions.Add(completed_task.Exception!);
-						break;
-					default:
-						scan_exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing scan task exceptions.")));
-						break;
-				}
-				finished_scan_tasks.Add(completed_task);
-				scan_tasks.RemoveAt(completed_task_idx);
-			}
-			if (scan_exceptions.Count > 0)
-				throw new AggregateException(scan_exceptions);
+			finished_scan_tasks = ProcessTasks(scan_tasks, scan_cts);
+			//while (scan_tasks.Count != 0)
+			//{
+			//	int completed_task_idx = Task.WaitAny(scan_tasks.ToArray(), 2000);
+			//	if (CancelRequested) scan_cts.Cancel();
+			//	if (completed_task_idx == -1) continue;
+			//	Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)> completed_task = scan_tasks[completed_task_idx];
+			//	switch (completed_task.Status)
+			//	{
+			//		case TaskStatus.RanToCompletion or TaskStatus.Canceled:
+			//			break;
+			//		case TaskStatus.Faulted:
+			//			scan_cts.Cancel();
+			//			scan_exceptions.Add(completed_task.Exception!);
+			//			break;
+			//		default:
+			//			scan_exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing scan task exceptions.")));
+			//			break;
+			//	}
+			//	finished_scan_tasks.Add(completed_task);
+			//	scan_tasks.RemoveAt(completed_task_idx);
+			//}
+			//if (scan_exceptions.Count > 0)
+			//	throw new AggregateException(scan_exceptions);
 		}
 		catch (AggregateException ex)
 		{
@@ -138,6 +178,9 @@ public static partial class BDSM
 				PromptUserToContinue();
 			return 1;
 		}
+
+		if (CancelRequested) return 1;
+		Console.CancelKeyPress -= CtrlCHandler!;
 		bool missed_some_files = false;
 		ConcurrentBag<string> missed_files = new();
 		foreach ((ConcurrentBag<PathMapping> pathmaps, ImmutableList<string> missed_ftp_entries) in finished_scan_tasks.Select(task => task.Result))
@@ -255,12 +298,37 @@ public static partial class BDSM
 				foreach (DownloadChunk chunk in current_file_download.DownloadChunks)
 					chunks.Enqueue(chunk);
 			}
+			Console.CancelKeyPress += CtrlCHandler!;
 			int download_task_count = (UserConfig.ConnectionInfo.MaxConnections < chunks.Count) ? UserConfig.ConnectionInfo.MaxConnections : chunks.Count;
-			Task[] download_tasks = new Task[download_task_count];
+			List<Task<bool>> download_tasks = new();
+			List<Task<bool>> finished_download_tasks = new();
+			List<AggregateException> download_exceptions = new();
+			using CancellationTokenSource download_cts = new();
+			CancellationToken download_ct = scan_cts.Token;
+
 			DownloadSpeedStopwatch.Start();
-			for (int i = 0; i < download_tasks.Length; i++)
-				download_tasks[i] = Task.Factory.StartNew(() => DownloadFileChunk(UserConfig.ConnectionInfo, in chunks, ReportProgress), TaskCreationOptions.LongRunning);
-			Task.WaitAll(download_tasks);
+			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
+				download_tasks.Add(Task.Factory.StartNew(() => { DownloadFileChunk(UserConfig.ConnectionInfo, in chunks, ReportProgress); return true; }, TaskCreationOptions.LongRunning));
+
+			try
+			{
+				ProcessTasks(download_tasks, download_cts);
+			}
+			catch (AggregateException ex)
+			{
+				logger.Error("Could not download some files. Failed download tasks had the following errors:");
+				foreach (Exception inner_ex in ex.Flatten().InnerExceptions)
+				{
+					logger.Error(inner_ex.Message);
+					logger.Error(inner_ex.StackTrace);
+				}
+				if (UserConfig.PromptToContinue)
+					PromptUserToContinue();
+				return 1;
+			}
+
+
+			//Task.WaitAll(download_tasks);
 			DownloadSpeedStopwatch.Stop();
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info in FileDownloadsInformation)
 			{
