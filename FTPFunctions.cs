@@ -119,13 +119,13 @@ public static class FTPFunctions
 		return bad_entries;
 	}
 
-	public static void DownloadFileChunk(Configuration.RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, Action<ChunkDownloadProgressInformation, string> reportprogress)
+	public static void DownloadFileChunks(Configuration.RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, Action<ChunkDownloadProgressInformation, string> reportprogress, CancellationToken ct)
 	{
 		byte[] buffer = new byte[65536];
 		FileStream local_filestream = null!;
 		using FtpClient client = SetupFTPClient(repoinfo);
 		ChunkDownloadProgressInformation progressinfo;
-		while (true)
+		while (!ct.IsCancellationRequested)
 		{
 			client.Connect();
 			if (!chunks.TryDequeue(out DownloadChunk chunk))
@@ -143,7 +143,7 @@ public static class FTPFunctions
 			int total_chunk_bytes = 0;
 			int remaining_bytes = chunk.Length;
 			int bytes_to_process = 0;
-			while (total_chunk_bytes < chunk.Length)
+			while ((total_chunk_bytes < chunk.Length) && !ct.IsCancellationRequested)
 			{
 				CurrentStopwatch.Restart();
 				bytes_to_process = (buffer.Length < remaining_bytes) ? buffer.Length : remaining_bytes;

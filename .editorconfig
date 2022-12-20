@@ -235,6 +235,12 @@ dotnet_diagnostic.RCS1211.severity = suggestion
 # IDE0002: Simplify Member Access
 dotnet_diagnostic.IDE0002.severity = suggestion
 
+# CA1805: Do not initialize unnecessarily
+dotnet_diagnostic.CA1805.severity = none
+
+# RCS1129: Remove redundant field initialization.
+dotnet_diagnostic.RCS1129.severity = none
+
 [*.{cs,vb}]
 dotnet_style_operator_placement_when_wrapping = beginning_of_line
 tab_width = 4

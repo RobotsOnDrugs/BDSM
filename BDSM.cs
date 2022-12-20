@@ -13,7 +13,6 @@ using static BDSM.FTPFunctions;
 using static BDSM.DownloadProgress;
 using static BDSM.UtilityFunctions;
 using static BDSM.Exceptions;
-using System.Collections.Generic;
 
 namespace BDSM;
 
@@ -138,33 +137,10 @@ public static partial class BDSM
 		using CancellationTokenSource scan_cts = new();
 		CancellationToken scan_ct = scan_cts.Token;
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct)));
+			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct), scan_ct));
 		try
 		{
 			finished_scan_tasks = ProcessTasks(scan_tasks, scan_cts);
-			//while (scan_tasks.Count != 0)
-			//{
-			//	int completed_task_idx = Task.WaitAny(scan_tasks.ToArray(), 2000);
-			//	if (CancelRequested) scan_cts.Cancel();
-			//	if (completed_task_idx == -1) continue;
-			//	Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)> completed_task = scan_tasks[completed_task_idx];
-			//	switch (completed_task.Status)
-			//	{
-			//		case TaskStatus.RanToCompletion or TaskStatus.Canceled:
-			//			break;
-			//		case TaskStatus.Faulted:
-			//			scan_cts.Cancel();
-			//			scan_exceptions.Add(completed_task.Exception!);
-			//			break;
-			//		default:
-			//			scan_exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing scan task exceptions.")));
-			//			break;
-			//	}
-			//	finished_scan_tasks.Add(completed_task);
-			//	scan_tasks.RemoveAt(completed_task_idx);
-			//}
-			//if (scan_exceptions.Count > 0)
-			//	throw new AggregateException(scan_exceptions);
 		}
 		catch (AggregateException ex)
 		{
@@ -302,14 +278,12 @@ public static partial class BDSM
 			int download_task_count = (UserConfig.ConnectionInfo.MaxConnections < chunks.Count) ? UserConfig.ConnectionInfo.MaxConnections : chunks.Count;
 			List<Task<bool>> download_tasks = new();
 			List<Task<bool>> finished_download_tasks = new();
-			List<AggregateException> download_exceptions = new();
 			using CancellationTokenSource download_cts = new();
-			CancellationToken download_ct = scan_cts.Token;
+			CancellationToken download_ct = download_cts.Token;
 
 			DownloadSpeedStopwatch.Start();
 			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-				download_tasks.Add(Task.Factory.StartNew(() => { DownloadFileChunk(UserConfig.ConnectionInfo, in chunks, ReportProgress); return true; }, TaskCreationOptions.LongRunning));
-
+				download_tasks.Add(Task.Run(() => { DownloadFileChunks(UserConfig.ConnectionInfo, in chunks, ReportProgress, download_ct); return true; }, download_ct));
 			try
 			{
 				ProcessTasks(download_tasks, download_cts);
@@ -326,21 +300,36 @@ public static partial class BDSM
 					PromptUserToContinue();
 				return 1;
 			}
-
-
-			//Task.WaitAll(download_tasks);
 			DownloadSpeedStopwatch.Stop();
-			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info in FileDownloadsInformation)
+			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in FileDownloadsInformation)
 			{
-				progress_info.Value.FileProgressBar.Message = "";
-				progress_info.Value.FileProgressBar.Dispose();
+				FileDownloadProgressInformation progress_info = progress_info_kvp.Value;
+				if (progress_info.IsInitialized)
+				{
+					if (!progress_info.IsComplete)
+					{
+						progress_info.Complete();
+						try
+						{
+							File.Delete(progress_info.FilePath);
+						}
+						catch (Exception ex)
+						{
+							logger.Error($"Tried to delete incomplete file {progress_info.FilePath} during cleanup but encountered an error:");
+							logger.Error(ex.StackTrace);
+							logger.Error(ex.Message);
+						}
+					}
+				}
 			}
 			TotalProgressBar.Message = "";
 			TotalProgressBar.Dispose();
 
 			OpTimer.Stop();
-			logger.Info($"Downloaded {FormatBytes(TotalBytesToDownload)} in {(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}{Pluralize(OpTimer.Elapsed.Seconds, " second")}.");
-			logger.Info($"Average speed: {FormatBytes(TotalBytesToDownload / OpTimer.Elapsed.TotalSeconds)}/s");
+			if (CancelRequested)
+				logger.Warn("Download canceled.");
+			logger.Info($"Downloaded {FormatBytes(TotalBytesDownloaded)} in {(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}{Pluralize(OpTimer.Elapsed.Seconds, " second")}.");
+			logger.Info($"Average speed: {FormatBytes(TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s");
 		}
 		logger.Info("Finished updating.");
 		if (UserConfig.PromptToContinue)

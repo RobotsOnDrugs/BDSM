@@ -75,8 +75,6 @@ public record FileDownloadProgressInformation
 	}
 	public void Complete()
 	{
-		FileInfo downloaded_file = new(FilePath);
-		Debug.Assert(downloaded_file.Length == TotalFileSize);
 		TotalTimeStopwatch.Stop();
 		ProgressUpdateStopwatch.Stop();
 		FileProgressBar.Dispose();
