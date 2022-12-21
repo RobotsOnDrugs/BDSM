@@ -1,8 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 
-using NLog.Time;
-
 using ShellProgressBar;
 
 namespace BDSM;
@@ -13,6 +11,7 @@ internal static class DownloadProgress
 	internal static readonly ProgressBarOptions DefaultTotalProgressBarOptions = new()
 	{
 		CollapseWhenFinished = true,
+		ShowEstimatedDuration = true,
 		DisplayTimeInRealTime = false,
 		EnableTaskBarProgress = true,
 		ProgressCharacter = ' '
@@ -36,8 +35,9 @@ internal static class DownloadProgress
 	internal static readonly ConcurrentDictionary<string, FileDownloadProgressInformation> FileDownloadsInformation = new();
 	internal static readonly Stopwatch DownloadSpeedStopwatch = new();
 	internal static readonly Stopwatch ProgressUpdateStopwatch = Stopwatch.StartNew();
-	internal static double TotalDownloadSpeed => DownloadSpeedStopwatch.Elapsed.TotalSeconds == 0 ? TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds : 0;
+	internal static double TotalDownloadSpeed => DownloadSpeedStopwatch.Elapsed.TotalSeconds != 0 ? TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds : 0;
 	internal static string TotalDownloadSpeedString => UtilityFunctions.FormatBytes(TotalDownloadSpeed) + "/s";
+	public static TimeSpan ETA => new(0, 0, 0, 0, (int)Math.Round(TotalBytesToDownload / TotalDownloadSpeed * 1000, 0));
 	private static bool TrackingTotalCurrentSpeed = false;
 
 	public static void TrackTotalCurrentSpeed()
@@ -71,7 +71,7 @@ internal static class DownloadProgress
 				lock (TotalProgressBar)
 				{
 					file_download_progress.FileProgressBar.Dispose();
-					file_download_progress.Complete();
+					file_download_progress.Complete(true);
 				}
 			}
 			else
@@ -80,7 +80,7 @@ internal static class DownloadProgress
 				{
 					string file_progress_message = $"{Path.GetFileName(filepath)} | {file_download_progress.TotalBytesDownloadedString} / {file_download_progress.TotalFileSizeString} (Current speed: {file_download_progress.CurrentSpeedString})";
 					file_download_progress.ProgressUpdateStopwatch.Restart();
-					file_download_progress.FileProgressBar.Tick((int)(file_download_progress.TotalBytesDownloaded / 1024), file_progress_message);
+					file_download_progress.FileProgressBar.Tick((int)(file_download_progress.TotalBytesDownloaded / 1024), file_download_progress.ETA, file_progress_message);
 				}
 			}
 			FileDownloadsInformation[filepath] = file_download_progress;
@@ -99,7 +99,7 @@ internal static class DownloadProgress
 					$"{TotalBytesDownloadedString} / {TotalBytesToDownloadString} " +
 					$"(Current speed: {TotalCurrentSpeedString}) " +
 					$"(Average speed: {UtilityFunctions.FormatBytes(TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
-				TotalProgressBar.Tick((int)(TotalBytesDownloaded / 1024), total_progress_message);
+				TotalProgressBar.Tick((int)(TotalBytesDownloaded / 1024), ETA, total_progress_message);
 				ProgressUpdateStopwatch.Restart();
 			}
 		}

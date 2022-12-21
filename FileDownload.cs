@@ -45,6 +45,7 @@ public record FileDownloadProgressInformation
 	public double CurrentSpeed { get; private set; }
 	public string CurrentSpeedString => UtilityFunctions.FormatBytes(CurrentSpeed) + "/s";
 	public Stopwatch ProgressUpdateStopwatch { get; private set; } = new();
+	public TimeSpan ETA => new(0, 0, 0, 0, (int)Math.Round(TotalFileSize / AverageSpeed * 1000, 0));
 	public long PreviousBytesDownloaded { get; private set; } = 0;
 	public required long TotalFileSize { get; init; }
 	public string TotalFileSizeString => UtilityFunctions.FormatBytes(TotalFileSize);
@@ -53,6 +54,7 @@ public record FileDownloadProgressInformation
 	public string AverageSpeedString => UtilityFunctions.FormatBytes(Math.Round(AverageSpeed, 2)) + "/s";
 	public bool IsInitialized { get; private set; } = false;
 	public bool IsComplete { get; private set; } = false;
+	public bool CompletedSuccessfully { get; private set; } = false;
 
 	private void TrackCurrentSpeed()
 	{
@@ -73,8 +75,9 @@ public record FileDownloadProgressInformation
 		_ = Task.Run(TrackCurrentSpeed);
 		IsInitialized = true;
 	}
-	public void Complete()
+	public void Complete(bool successful)
 	{
+		CompletedSuccessfully = successful;
 		TotalTimeStopwatch.Stop();
 		ProgressUpdateStopwatch.Stop();
 		FileProgressBar.Dispose();

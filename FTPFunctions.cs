@@ -19,14 +19,42 @@ public static class FTPFunctions
 	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo)
 	{
 		FtpClient client = DefaultSideloaderClient(repoinfo);
-		client.Connect();
 		return client;
+	}
+	public static bool TryConnect(FtpClient client, int max_retries = 3)
+	{
+		bool success = false;
+		int retries = 0;
+		while (retries <= max_retries)
+		{
+			try
+			{
+				client.Connect();
+				success = true;
+				break;
+			}
+			catch (FtpCommandException ex)
+			{
+				switch (ex.ResponseType)
+				{
+					case FtpResponseType.TransientNegativeCompletion:
+						Thread.Sleep(1000);
+						retries++;
+						break;
+					case FtpResponseType.PermanentNegativeCompletion:
+						break;
+					default:
+						throw new Exceptions.BDSMInternalFaultException("Error handling a connection failure.", ex);
+				}
+			}
+		}
+		return success;
 	}
 	public static ConcurrentBag<PathMapping> GetFilesOnServerIgnoreErrors(ref ConcurrentBag<PathMapping> pathmaps, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct) => GetFilesOnServer(ref pathmaps, repoinfo, ct).PathMappings;
 	public static (ConcurrentBag<PathMapping> PathMappings, ImmutableList<string> MissedFTPEntries) GetFilesOnServer(ref ConcurrentBag<PathMapping> pathmaps, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct)
 	{
 		int tid = Environment.CurrentManagedThreadId;
-		ScanQueueWaitStatus[tid] = false;
+		ScanQueueWaitStatus[tid] = true;
 		bool should_wait_for_queue = true;
 		if (ct.IsCancellationRequested)
 			return (new(), ImmutableList<string>.Empty);
@@ -35,13 +63,13 @@ public static class FTPFunctions
 		List<string> missed_ftp_entries = new();
 		FtpException? last_ftp_exception = null;
 		List<Exception> accumulated_exceptions = new();
-		using FtpClient scanclient = SetupFTPClient(repoinfo);
-		scanclient.Connect();
-
-		void Cleanup() { scanclient.Disconnect(); scanclient.Dispose(); }
-		void ErrorOut(Exception ex) { Cleanup(); throw ex; }
-		(ConcurrentBag<PathMapping> files, ImmutableList<string> missed_ftp_entries) ExitGracefully() { Cleanup(); return (files, missed_ftp_entries.ToImmutableList()); }
 		bool retrying_scan = false;
+		using FtpClient scanclient = SetupFTPClient(repoinfo);
+		if (!TryConnect(scanclient))
+			return ExitGracefully();
+		ScanQueueWaitStatus[tid] = true;
+		void ErrorOut(Exception ex) { scanclient.Dispose(); throw ex; }
+		(ConcurrentBag<PathMapping> files, ImmutableList<string> missed_ftp_entries) ExitGracefully() { scanclient.Dispose(); return (files, missed_ftp_entries.ToImmutableList()); }
 		while (!ct.IsCancellationRequested)
 		{
 			ScanQueueWaitStatus[tid] = false;
@@ -57,37 +85,44 @@ public static class FTPFunctions
 						continue;
 					break;
 				}
+				retrying_scan = false;
 			}
 			ScanQueueWaitStatus[tid] = false;
 			string remotepath = pathmap.RemoteFullPath;
 			string localpath = pathmap.LocalFullPath;
 			PathMapping _pathmap;
-			FtpListItem[]? _scanned_files = null;
 			FtpListItem[] scanned_files;
 			int scan_attempts = 0;
 			ct.ThrowIfCancellationRequested();
-			try { _scanned_files = scanclient.GetListing(remotepath); }
-			catch (IOException)
+			try
+			{
+				scanned_files = scanclient.GetListing(remotepath);
+				retrying_scan = false;
+			}
+			catch (Exception ex) when (ex is FtpCommandException or IOException)
 			{
 				scan_attempts++;
 				Thread.Sleep(500);
-				if (scan_attempts < 3)
-					_scanned_files = null;
+				if (scan_attempts == 3)
+				{
+					missed_ftp_entries.Add(remotepath);
+					break;
+				}
+				continue;
 			}
 			catch (FtpException ex) when (ex.Message != last_ftp_exception?.Message)
 			{
 				accumulated_exceptions.Add(ex);
-				retrying_scan = true;
 				continue;
 			}
 			accumulated_exceptions.Clear();
 			retrying_scan = false;
-			if (_scanned_files is null)
+			scan_attempts = 0;
+			if (scanned_files is null)
 			{
 				missed_ftp_entries.Add(remotepath);
 				continue;
 			}
-			scanned_files = _scanned_files;
 			foreach (FtpListItem item in scanned_files)
 				switch (item.Type)
 				{

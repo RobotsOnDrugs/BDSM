@@ -75,11 +75,11 @@ public static class UtilityFunctions
 	public static void PromptUserToContinue()
 	{
 		Console.WriteLine("Press any key to continue or Ctrl-C to abort");
-		_ = Console.ReadKey();
+		_ = Console.ReadKey(true);
 	}
 	public static void PromptBeforeExit()
 	{
 		Console.WriteLine("Press any key to exit.");
-		_ = Console.ReadKey();
+		_ = Console.ReadKey(true);
 	}
 }

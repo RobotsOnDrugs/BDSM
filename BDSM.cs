@@ -18,22 +18,16 @@ namespace BDSM;
 
 public static partial class BDSM
 {
-	private static bool CancelRequested = false;
-	private static void CtrlCHandler(object sender, ConsoleCancelEventArgs args)
-	{
-		CancelRequested = true;
-		Console.WriteLine("Ctrl-C caught, cleaning up...");
-		args.Cancel = true;
-	}
 	private static List<Task<T>> ProcessTasks<T>(List<Task<T>> tasks, CancellationTokenSource cts)
 	{
+		bool canceled = false;
+		void CtrlCHandler(object sender, ConsoleCancelEventArgs args) { cts.Cancel(); canceled = true; args.Cancel = true; }
+		Console.CancelKeyPress += CtrlCHandler!;
 		List<Task<T>> finished_tasks = new();
 		List<AggregateException> exceptions = new();
 		while (tasks.Count != 0)
 		{
-			int completed_task_idx = Task.WaitAny(tasks.ToArray(), 2000);
-			if (CancelRequested) cts.Cancel();
-			if (completed_task_idx == -1) continue;
+			int completed_task_idx = Task.WaitAny(tasks.ToArray());
 			Task<T> completed_task = tasks[completed_task_idx];
 			switch (completed_task.Status)
 			{
@@ -50,7 +44,10 @@ public static partial class BDSM
 			finished_tasks.Add(completed_task);
 			tasks.RemoveAt(completed_task_idx);
 		}
-		return exceptions.Count == 0 ? finished_tasks : throw new AggregateException(exceptions);
+		Console.CancelKeyPress -= CtrlCHandler!;
+		return canceled
+			? throw new OperationCanceledException()
+			: exceptions.Count == 0 ? finished_tasks : throw new AggregateException(exceptions);
 	}
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
@@ -61,7 +58,6 @@ public static partial class BDSM
 
 	public static async Task<int> Main()
 	{
-		Console.CancelKeyPress += CtrlCHandler!;
 		const string SKIP_SCAN_CONFIG_FILENAME = "SkipScan.yaml";
 		ILogger logger = LogManager.GetCurrentClassLogger();
 		_ = SetConsoleOutputCP(65001);
@@ -74,7 +70,6 @@ public static partial class BDSM
 			PromptBeforeExit();
 			return 1;
 		}
-
 		ImmutableHashSet<PathMapping> BaseDirectoriesToScan;
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
 		ConcurrentDictionary<string, PathMapping> FilesOnServer = new();
@@ -120,7 +115,6 @@ public static partial class BDSM
 		logger.Info("Scanning the server.");
 		OpTimer.Start();
 		List<string> bad_entries = SanityCheckBaseDirectories(BaseDirectoriesToScan, UserConfig.ConnectionInfo);
-		if (CancelRequested) return 1;
 		if (bad_entries.Count > 0)
 		{
 			foreach (string bad_entry in bad_entries)
@@ -131,32 +125,33 @@ public static partial class BDSM
 			return 1;
 		}
 
-		if (CancelRequested) return 1;
 		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> scan_tasks = new();
 		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> finished_scan_tasks = new();
 		using CancellationTokenSource scan_cts = new();
 		CancellationToken scan_ct = scan_cts.Token;
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
 			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct), scan_ct));
-		try
+		try { finished_scan_tasks = ProcessTasks(scan_tasks, scan_cts); }
+		catch (OperationCanceledException)
 		{
-			finished_scan_tasks = ProcessTasks(scan_tasks, scan_cts);
+			logger.Fatal("Scanning was canceled.");
+			if (UserConfig.PromptToContinue)
+				PromptBeforeExit();
+			return 1;
 		}
 		catch (AggregateException ex)
 		{
-			logger.Error("Could not scan the server. Failed scan tasks had the following errors:");
+			logger.Fatal("Could not scan the server. Failed scan tasks had the following errors:");
 			foreach (Exception inner_ex in ex.Flatten().InnerExceptions)
 			{
 				logger.Error(inner_ex.Message);
 				logger.Error(inner_ex.StackTrace);
 			}
 			if (UserConfig.PromptToContinue)
-				PromptUserToContinue();
+				PromptBeforeExit();
 			return 1;
 		}
 
-		if (CancelRequested) return 1;
-		Console.CancelKeyPress -= CtrlCHandler!;
 		bool missed_some_files = false;
 		ConcurrentBag<string> missed_files = new();
 		foreach ((ConcurrentBag<PathMapping> pathmaps, ImmutableList<string> missed_ftp_entries) in finished_scan_tasks.Select(task => task.Result))
@@ -217,7 +212,6 @@ public static partial class BDSM
 		OpTimer.Stop();
 		logger.Info($"Comparison took {OpTimer.ElapsedMilliseconds}ms.");
 		logger.Info($"{Pluralize(FilesToDownload.Count, " file")} to download and {Pluralize(FilesToDelete.Count, " file")} to delete.");
-
 		if (!FilesToDelete.IsEmpty)
 		{
 			ConcurrentBag<FileInfo> failed_to_delete = new();
@@ -257,6 +251,7 @@ public static partial class BDSM
 			foreach (FileDownload file_download in FilesToDownload)
 				TotalBytesToDownload += file_download.TotalFileSize;
 			logger.Info($"{Pluralize(NumberOfFilesToDownload, " file")} ({FormatBytes(TotalBytesToDownload)}) to download.");
+
 			if (UserConfig.PromptToContinue)
 				PromptUserToContinue();
 
@@ -274,12 +269,12 @@ public static partial class BDSM
 				foreach (DownloadChunk chunk in current_file_download.DownloadChunks)
 					chunks.Enqueue(chunk);
 			}
-			Console.CancelKeyPress += CtrlCHandler!;
 			int download_task_count = (UserConfig.ConnectionInfo.MaxConnections < chunks.Count) ? UserConfig.ConnectionInfo.MaxConnections : chunks.Count;
 			List<Task<bool>> download_tasks = new();
 			List<Task<bool>> finished_download_tasks = new();
 			using CancellationTokenSource download_cts = new();
 			CancellationToken download_ct = download_cts.Token;
+			bool download_canceled = false;
 
 			DownloadSpeedStopwatch.Start();
 			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
@@ -288,6 +283,7 @@ public static partial class BDSM
 			{
 				ProcessTasks(download_tasks, download_cts);
 			}
+			catch (OperationCanceledException) { download_canceled = true; }
 			catch (AggregateException ex)
 			{
 				logger.Error("Could not download some files. Failed download tasks had the following errors:");
@@ -304,21 +300,15 @@ public static partial class BDSM
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in FileDownloadsInformation)
 			{
 				FileDownloadProgressInformation progress_info = progress_info_kvp.Value;
-				if (progress_info.IsInitialized)
+				if (progress_info.IsInitialized && !progress_info.IsComplete)
 				{
-					if (!progress_info.IsComplete)
+					progress_info.Complete(false);
+					try { File.Delete(progress_info.FilePath); }
+					catch (Exception ex)
 					{
-						progress_info.Complete();
-						try
-						{
-							File.Delete(progress_info.FilePath);
-						}
-						catch (Exception ex)
-						{
-							logger.Error($"Tried to delete incomplete file {progress_info.FilePath} during cleanup but encountered an error:");
-							logger.Error(ex.StackTrace);
-							logger.Error(ex.Message);
-						}
+						logger.Error($"Tried to delete incomplete file {progress_info.FilePath} during cleanup but encountered an error:");
+						logger.Error(ex.StackTrace);
+						logger.Error(ex.Message);
 					}
 				}
 			}
@@ -326,7 +316,7 @@ public static partial class BDSM
 			TotalProgressBar.Dispose();
 
 			OpTimer.Stop();
-			if (CancelRequested)
+			if (download_canceled)
 				logger.Warn("Download canceled.");
 			logger.Info($"Downloaded {FormatBytes(TotalBytesDownloaded)} in {(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}{Pluralize(OpTimer.Elapsed.Seconds, " second")}.");
 			logger.Info($"Average speed: {FormatBytes(TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s");
