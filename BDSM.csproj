@@ -12,6 +12,8 @@
 	<AnalysisLevel>preview</AnalysisLevel>
 	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	<Platforms>x64</Platforms>
+	<ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+	<IsPackable>false</IsPackable>
 	<!-- <PublishAot>true</PublishAot> -->
   </PropertyGroup>
 
