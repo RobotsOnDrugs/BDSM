@@ -11,10 +11,9 @@ assignees: RobotsOnDrugs
 
 *What did you expect to happen?*
 
-
 **Actual behavior**
 
-*What happened instead? Paste any errors shown.*
+*What happened instead? Describe the problem and paste any relevant errors from BDSM.log.*
 
 **Required information**
 
