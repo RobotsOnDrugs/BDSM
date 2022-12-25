@@ -1,8 +1,9 @@
 ﻿using System.Collections.Concurrent;
-using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text;
 using FluentFTP;
+
+using static BDSM.Exceptions;
 
 namespace BDSM;
 public static class FTPFunctions
@@ -42,22 +43,25 @@ public static class FTPFunctions
 						retries++;
 						break;
 					case FtpResponseType.PermanentNegativeCompletion:
+						throw;
+					case FtpResponseType.PositivePreliminary or FtpResponseType.PositiveCompletion or FtpResponseType.PositiveIntermediate:
+						// log this
+						Debugger.Break();
+						retries++;
 						break;
 					default:
-						throw new Exceptions.BDSMInternalFaultException("Error handling a connection failure.", ex);
+						throw new BDSMInternalFaultException("Error handling a connection failure.", ex);
 				}
 			}
 		}
 		return success;
 	}
-	public static ConcurrentBag<PathMapping> GetFilesOnServerIgnoreErrors(ref ConcurrentBag<PathMapping> pathmaps, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct) => GetFilesOnServer(ref pathmaps, repoinfo, ct).PathMappings;
-	public static (ConcurrentBag<PathMapping> PathMappings, ImmutableList<string> MissedFTPEntries) GetFilesOnServer(ref ConcurrentBag<PathMapping> pathmaps, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct)
+	public static void GetFilesOnServer(ref ConcurrentBag<PathMapping> paths_to_scan, ref ConcurrentDictionary<string, PathMapping> files_found, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct)
 	{
 		int tid = Environment.CurrentManagedThreadId;
 		ScanQueueWaitStatus[tid] = true;
 		bool should_wait_for_queue = true;
-		if (ct.IsCancellationRequested)
-			return (new(), ImmutableList<string>.Empty);
+		if (ct.IsCancellationRequested) return;
 		ConcurrentBag<PathMapping> files = new();
 		PathMapping pathmap = default;
 		List<string> missed_ftp_entries = new();
@@ -66,10 +70,9 @@ public static class FTPFunctions
 		bool retrying_scan = false;
 		using FtpClient scanclient = SetupFTPClient(repoinfo);
 		if (!TryConnect(scanclient))
-			return ExitGracefully();
+			throw new FTPConnectionException();
 		ScanQueueWaitStatus[tid] = true;
 		void ErrorOut(Exception ex) { scanclient.Dispose(); throw ex; }
-		(ConcurrentBag<PathMapping> files, ImmutableList<string> missed_ftp_entries) ExitGracefully() { scanclient.Dispose(); return (files, missed_ftp_entries.ToImmutableList()); }
 		while (!ct.IsCancellationRequested)
 		{
 			ScanQueueWaitStatus[tid] = false;
@@ -77,7 +80,7 @@ public static class FTPFunctions
 				ErrorOut(new AggregateException(accumulated_exceptions));
 			if (!retrying_scan)
 			{
-				if (!pathmaps.TryTake(out pathmap))
+				if (!paths_to_scan.TryTake(out pathmap))
 				{
 					ScanQueueWaitStatus[tid] = true;
 					should_wait_for_queue = ScanQueueWaitStatus.Values.Count(waiting => waiting) != ScanQueueWaitStatus.Count;
@@ -105,8 +108,8 @@ public static class FTPFunctions
 				Thread.Sleep(500);
 				if (scan_attempts == 3)
 				{
-					missed_ftp_entries.Add(remotepath);
-					break;
+					paths_to_scan.Add(pathmap);
+					throw;
 				}
 				continue;
 			}
@@ -120,7 +123,7 @@ public static class FTPFunctions
 			scan_attempts = 0;
 			if (scanned_files is null)
 			{
-				missed_ftp_entries.Add(remotepath);
+				paths_to_scan.Add(pathmap);
 				continue;
 			}
 			foreach (FtpListItem item in scanned_files)
@@ -128,18 +131,17 @@ public static class FTPFunctions
 				{
 					case FtpObjectType.File:
 						_pathmap = pathmap with { LocalRelativePath = string.Join('\\', pathmap.LocalRelativePath, item.Name), RemoteRelativePath = string.Join('/', pathmap.RemoteRelativePath, item.Name), FileSize = item.Size };
-						files.Add(_pathmap);
+						_ = files_found.TryAdd(_pathmap.LocalFullPathLower, _pathmap);
 						break;
 					case FtpObjectType.Directory:
 						_pathmap = pathmap with { LocalRelativePath = string.Join('\\', pathmap.LocalRelativePath, item.Name), RemoteRelativePath = string.Join('/', pathmap.RemoteRelativePath, item.Name) };
-						pathmaps.Add(_pathmap);
+						paths_to_scan.Add(_pathmap);
 						break;
 					case FtpObjectType.Link:
 						break;
 				}
 		}
-		ct.ThrowIfCancellationRequested();
-		return ExitGracefully();
+		scanclient.Dispose();
 	}
 	public static List<string> SanityCheckBaseDirectories(IEnumerable<PathMapping> entries_to_check, Configuration.RepoConnectionInfo repoinfo)
 	{
@@ -159,10 +161,12 @@ public static class FTPFunctions
 		byte[] buffer = new byte[65536];
 		FileStream local_filestream = null!;
 		using FtpClient client = SetupFTPClient(repoinfo);
+		void Cleanup() { client.Dispose(); local_filestream.Dispose(); }
 		ChunkDownloadProgressInformation progressinfo;
 		while (!ct.IsCancellationRequested)
 		{
-			client.Connect();
+			if (!TryConnect(client))
+				throw new FTPConnectionException();
 			if (!chunks.TryDequeue(out DownloadChunk chunk))
 				break;
 			if (chunk.LocalPath != local_filestream?.Name)
@@ -172,7 +176,18 @@ public static class FTPFunctions
 				local_filestream = new(chunk.LocalPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
 			}
 			Stopwatch CurrentStopwatch = new();
-			using Stream ftp_filestream = client.OpenRead(chunk.RemotePath, FtpDataType.Binary, chunk.Offset, chunk.Offset + chunk.Length);
+			Stream ftp_filestream;
+			int connection_retries = 0;
+			while (true)
+			{
+				try
+				{
+					ftp_filestream = client.OpenRead(chunk.RemotePath, FtpDataType.Binary, chunk.Offset, chunk.Offset + chunk.Length);
+					break;
+				}
+				catch (Exception) when (connection_retries <= 2) { connection_retries++; }
+				catch (Exception) { Cleanup(); throw; }
+			}
 			local_filestream.Lock(chunk.Offset, chunk.Length);
 			local_filestream.Position = chunk.Offset;
 			int total_chunk_bytes = 0;
@@ -182,10 +197,20 @@ public static class FTPFunctions
 			{
 				CurrentStopwatch.Restart();
 				bytes_to_process = (buffer.Length < remaining_bytes) ? buffer.Length : remaining_bytes;
-				ftp_filestream.ReadExactly(buffer, 0, bytes_to_process);
-				remaining_bytes -= bytes_to_process;
-				total_chunk_bytes += bytes_to_process;
-				local_filestream.Write(buffer, 0, bytes_to_process);
+				try
+				{
+					ftp_filestream.ReadExactly(buffer, 0, bytes_to_process);
+					remaining_bytes -= bytes_to_process;
+					total_chunk_bytes += bytes_to_process;
+					local_filestream.Write(buffer, 0, bytes_to_process);
+				}
+				catch (Exception)
+				{
+					local_filestream.Unlock(chunk.Offset, chunk.Length);
+					Cleanup();
+					CurrentStopwatch.Stop();
+					throw;
+				}
 				progressinfo = new ()
 				{
 					BytesDownloaded = bytes_to_process,
@@ -197,7 +222,6 @@ public static class FTPFunctions
 			}
 			local_filestream.Unlock(chunk.Offset, chunk.Length);
 			ftp_filestream.Dispose();
-			client.Disconnect();
 			CurrentStopwatch.Stop();
 		}
 		local_filestream?.Flush();

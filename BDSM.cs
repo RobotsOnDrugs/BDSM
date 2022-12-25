@@ -14,29 +14,44 @@ using static BDSM.DownloadProgress;
 using static BDSM.UtilityFunctions;
 using static BDSM.Exceptions;
 using static BDSM.LoggingConfiguration;
+using Spectre.Console;
 
 namespace BDSM;
 
 public static partial class BDSM
 {
-	private static List<Task<T>> ProcessTasks<T>(List<Task<T>> tasks, CancellationTokenSource cts)
+#if DEBUG
+	private static void RaiseInternalFault(ILogger logger, string message) { logger.Debug(message); Debugger.Break(); }
+#else
+	private static void RaiseInternalFault(ILogger logger, string message)
+	{
+		BDSMInternalFaultException int_ex = new(message);
+		LogException(logger, int_ex);
+		throw int_ex;
+	}
+#endif
+
+	private static List<Task> ProcessTasks(List<Task> tasks, CancellationTokenSource cts)
 	{
 		bool canceled = false;
+		bool all_faulted = true;
 		void CtrlCHandler(object sender, ConsoleCancelEventArgs args) { cts.Cancel(); canceled = true; args.Cancel = true; }
 		Console.CancelKeyPress += CtrlCHandler!;
-		List<Task<T>> finished_tasks = new();
+		List<Task> finished_tasks = new(tasks.Count);
 		List<AggregateException> exceptions = new();
 		while (tasks.Count != 0)
 		{
 			int completed_task_idx = Task.WaitAny(tasks.ToArray());
-			Task<T> completed_task = tasks[completed_task_idx];
+			Task completed_task = tasks[completed_task_idx];
 			switch (completed_task.Status)
 			{
 				case TaskStatus.RanToCompletion or TaskStatus.Canceled:
 					break;
 				case TaskStatus.Faulted:
-					cts.Cancel();
-					exceptions.Add(completed_task.Exception!);
+					AggregateException taskex = completed_task.Exception!;
+					exceptions.Add(taskex);
+					if (taskex.InnerException is not FTPConnectionException)
+						cts.Cancel();
 					break;
 				default:
 					exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing task exceptions.")));
@@ -46,9 +61,11 @@ public static partial class BDSM
 			tasks.RemoveAt(completed_task_idx);
 		}
 		Console.CancelKeyPress -= CtrlCHandler!;
-		return canceled
-			? throw new OperationCanceledException()
-			: exceptions.Count == 0 ? finished_tasks : throw new AggregateException(exceptions);
+		if (canceled) throw new OperationCanceledException();
+		foreach (Task task in finished_tasks)
+			if (task.Status == TaskStatus.RanToCompletion)
+				all_faulted = false;
+		return all_faulted ? throw new AggregateException(exceptions) : finished_tasks;
 	}
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
@@ -71,10 +88,11 @@ public static partial class BDSM
 		Configuration.UserConfiguration UserConfig = await Configuration.GetUserConfigurationAsync();
 		if (UserConfig.GamePath == @"X:\Your HoneySelect 2 DX folder here\")
 		{
-			LogMarkupText(logger, LogLevel.Error,"[maroon]Your mod directory has not been set.[/]");
+			LogMarkupText(logger, LogLevel.Error,"[red3]Your mod directory has not been set.[/]");
 			PromptBeforeExit();
 			return 1;
 		}
+
 		ImmutableHashSet<PathMapping> BaseDirectoriesToScan;
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
 		ConcurrentDictionary<string, PathMapping> FilesOnServer = new();
@@ -117,7 +135,6 @@ public static partial class BDSM
 		}
 
 		Stopwatch OpTimer = new();
-
 		LogMarkupText(logger, LogLevel.Info, "Scanning the server.");
 		OpTimer.Start();
 		List<string> bad_entries = SanityCheckBaseDirectories(BaseDirectoriesToScan, UserConfig.ConnectionInfo);
@@ -131,12 +148,12 @@ public static partial class BDSM
 			return 1;
 		}
 
-		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> scan_tasks = new();
-		List<Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)>> finished_scan_tasks = new();
+		List<Task> scan_tasks = new();
+		List<Task> finished_scan_tasks = new();
 		using CancellationTokenSource scan_cts = new();
 		CancellationToken scan_ct = scan_cts.Token;
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, UserConfig.ConnectionInfo, scan_ct), scan_ct));
+			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, ref FilesOnServer, UserConfig.ConnectionInfo, scan_ct), scan_ct));
 		try { finished_scan_tasks = ProcessTasks(scan_tasks, scan_cts); }
 		catch (OperationCanceledException)
 		{
@@ -147,7 +164,7 @@ public static partial class BDSM
 		}
 		catch (AggregateException ex)
 		{
-			LogMarkupText(logger, LogLevel.Fatal,"[maroon]Could not scan the server. Failed scan tasks had the following errors:[/]");
+			LogMarkupText(logger, LogLevel.Fatal,"[red3]Could not scan the server. Failed scan tasks had the following errors:[/]");
 			foreach (Exception inner_ex in ex.Flatten().InnerExceptions)
 				LogException(logger, ex);
 			if (UserConfig.PromptToContinue)
@@ -155,29 +172,10 @@ public static partial class BDSM
 			return 1;
 		}
 
-		bool missed_some_files = false;
-		ConcurrentBag<string> missed_files = new();
-		foreach ((ConcurrentBag<PathMapping> pathmaps, ImmutableList<string> missed_ftp_entries) in finished_scan_tasks.Select(task => task.Result))
-		{
-			foreach (PathMapping pathmap in pathmaps)
-				FilesOnServer.TryAdd(pathmap.LocalFullPathLower, pathmap);
-			missed_some_files = !missed_ftp_entries.IsEmpty;
-			foreach (string missed_ftp_entry in missed_ftp_entries)
-				missed_files.Add(missed_ftp_entry);
-		}
-		foreach (Task<(ConcurrentBag<PathMapping>, ImmutableList<string>)> finished_scan_task in finished_scan_tasks)
-			finished_scan_task.Dispose();
 		if (FilesOnServer.IsEmpty && !DirectoriesToScan.IsEmpty)
 		{
-			LogMarkupText(logger, LogLevel.Error,"[maroon]No files could be scanned due to network or other errors.[/]");
+			LogMarkupText(logger, LogLevel.Error,"[red3]No files could be scanned due to network or other errors.[/]");
 			return 1;
-		}
-		if (missed_some_files)
-		{
-			logger.Debug("Could not scan all files on the server. The following files could not be compared:");
-			foreach (string missed_file in missed_files)
-				logger.Debug(missed_file);
-			LogMarkupText(logger, LogLevel.Warn,"Some files could not be scanned due to network errors.");
 		}
 		OpTimer.Stop();
 		LogMarkupText(logger, LogLevel.Info,$"Scanned [orchid2]{FilesOnServer.Count}[/] files in [orchid2]{OpTimer.ElapsedMilliseconds}ms[/].");
@@ -192,18 +190,24 @@ public static partial class BDSM
 			IEnumerable<FileInfo> file_enumeration = base_dir_di.EnumerateFiles("*", new EnumerationOptions() { RecurseSubdirectories = true, IgnoreInaccessible = true });
 			try
 			{
+				string filepath_idx = "";
+				bool is_disabled_zipmod = false;
 				foreach (FileInfo fileondiskinfo in file_enumeration)
 				{
-					if (FilesOnServer.TryGetValue(fileondiskinfo.FullName.ToLower(), out PathMapping match_pm) && match_pm.FileSize == fileondiskinfo.Length)
-						_ = FilesOnServer.TryRemove(match_pm.LocalFullPathLower, out _);
-					else if (pm.DeleteClientFiles)
-						FilesToDelete.Add(fileondiskinfo);
+					is_disabled_zipmod = fileondiskinfo.Extension == ".zi_mod";
+					filepath_idx = is_disabled_zipmod ?
+						Path.ChangeExtension(fileondiskinfo.FullName, ".zipmod").ToLower() :
+						filepath_idx = fileondiskinfo.FullName.ToLower();
+				if (FilesOnServer.TryGetValue(filepath_idx, out PathMapping match_pm) && (is_disabled_zipmod || match_pm.FileSize == fileondiskinfo.Length))
+					_ = FilesOnServer.TryRemove(match_pm.LocalFullPathLower, out _);
+				else if (pm.DeleteClientFiles)
+					FilesToDelete.Add(fileondiskinfo);
 				}
 			}
 			catch (Exception ex)
 			{
 				local_access_successful = false;
-				LogMarkupText(logger, LogLevel.Error,$"[maroon][red1]Could not access {pm.LocalFullPath}[/]. Ensure that you have the correct path specified in your configuration and that you have permission to access it.[/]");
+				LogMarkupText(logger, LogLevel.Error,$"[red3][red1]Could not access {pm.LocalFullPath.EscapeMarkup()}[/]. Ensure that you have the correct path specified in your configuration and that you have permission to access it.[/]");
 				local_access_exceptions.Enqueue(ex);
 				continue;
 			}
@@ -221,7 +225,7 @@ public static partial class BDSM
 			List<Exception> failed_deletions = new();
 			LogMarkupText(logger, LogLevel.Info,"Will delete files:");
 			foreach (FileInfo pm in FilesToDelete)
-				LogMarkupText(logger, LogLevel.Info,$"[orangered1]{pm.FullName}[/]");
+				LogMarkupText(logger, LogLevel.Info,$"[orangered1]{pm.FullName.EscapeMarkup()}[/]");
 			if (UserConfig.PromptToContinue)
 			{
 				LogMarkupText(logger, LogLevel.Info,$"[orchid2]{Pluralize(FilesToDelete.Count, " file")}[/] marked for deletion.");
@@ -234,14 +238,14 @@ public static partial class BDSM
 				{
 					failed_to_delete.Add(pm);
 					failed_deletions.Add(ex);
-					LogMarkupText(logger, LogLevel.Warn,$"[yellow3_1]{ex.Message}[/]");
+					LogMarkupText(logger, LogLevel.Warn,$"[yellow3_1]{ex.Message.EscapeMarkup()}[/]");
 				}
 			}
 			LogMarkupText(logger, LogLevel.Info,$"[orchid2]{Pluralize(FilesToDelete.Count - failed_to_delete.Count, " file")}[/] deleted.");
 			Debug.Assert(failed_deletions.Count == failed_to_delete.Count);
 			if (failed_deletions.Count > 0)
 			{
-				LogMarkupText(logger, LogLevel.Error,$"[red1]{Pluralize(failed_to_delete.Count, " file")}[/][maroon] could not be deleted.[/]");
+				LogMarkupText(logger, LogLevel.Error,$"[red1]{Pluralize(failed_to_delete.Count, " file")}[/][red3] could not be deleted.[/]");
 				throw new AggregateException(failed_deletions);
 			}
 		}
@@ -252,7 +256,7 @@ public static partial class BDSM
 			NumberOfFilesToDownload = FilesToDownload.Count;
 			foreach (FileDownload file_download in FilesToDownload)
 				TotalBytesToDownload += file_download.TotalFileSize;
-			LogMarkupText(logger, LogLevel.Info,$"[orchid2]{Pluralize(NumberOfFilesToDownload, " file")}[/] ([orchid2]{FormatBytes(TotalBytesToDownload)}[/]) to download.");
+			LogMarkupText(logger, LogLevel.Info, $"[orchid2]{Pluralize(NumberOfFilesToDownload, " file")}[/] ([orchid2]{FormatBytes(TotalBytesToDownload)}[/]) to download.");
 
 			if (UserConfig.PromptToContinue)
 				PromptUserToContinue();
@@ -272,29 +276,19 @@ public static partial class BDSM
 					chunks.Enqueue(chunk);
 			}
 			int download_task_count = (UserConfig.ConnectionInfo.MaxConnections < chunks.Count) ? UserConfig.ConnectionInfo.MaxConnections : chunks.Count;
-			List<Task<bool>> download_tasks = new();
-			List<Task<bool>> finished_download_tasks = new();
+			List<Task> download_tasks = new();
+			List<Task> finished_download_tasks = new();
 			using CancellationTokenSource download_cts = new();
 			CancellationToken download_ct = download_cts.Token;
 			bool download_canceled = false;
+			AggregateException? download_failures = null;
 
 			DownloadSpeedStopwatch.Start();
 			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-				download_tasks.Add(Task.Run(() => { DownloadFileChunks(UserConfig.ConnectionInfo, in chunks, ReportProgress, download_ct); return true; }, download_ct));
-			try
-			{
-				ProcessTasks(download_tasks, download_cts);
-			}
+				download_tasks.Add(Task.Run(() => DownloadFileChunks(UserConfig.ConnectionInfo, in chunks, ReportProgress, download_ct), download_ct));
+			try { ProcessTasks(download_tasks, download_cts); }
 			catch (OperationCanceledException) { download_canceled = true; }
-			catch (AggregateException ex)
-			{
-				LogMarkupText(logger, LogLevel.Error,"[maroon]Could not download some files. Failed download tasks had the following errors:[/]");
-				foreach (Exception inner_ex in ex.Flatten().InnerExceptions)
-					LogException(logger, ex);
-				if (UserConfig.PromptToContinue)
-					PromptUserToContinue();
-				return 1;
-			}
+			catch (AggregateException ex) { download_failures = ex; }
 			DownloadSpeedStopwatch.Stop();
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in FileDownloadsInformation)
 			{
@@ -305,18 +299,25 @@ public static partial class BDSM
 					try { File.Delete(progress_info.FilePath); }
 					catch (Exception ex)
 					{
-						LogMarkupText(logger, LogLevel.Error,$"[maroon]Tried to delete incomplete file [red1]{progress_info.FilePath}[/] during cleanup but encountered an error:[/]");
+						LogMarkupText(logger, LogLevel.Error, $"[red3]Tried to delete incomplete file [red1]{progress_info.FilePath.EscapeMarkup()}[/] during cleanup but encountered an error:[/]");
 						LogException(logger, ex);
 					}
 				}
 			}
 			TotalProgressBar.Message = "";
 			TotalProgressBar.Dispose();
-
 			OpTimer.Stop();
+			if (download_failures is not null)
+			{
+				LogMarkupText(logger, LogLevel.Error, "[red3]Could not download some files. Check the log for error details.[/]");
+				foreach (Exception inner_ex in download_failures.Flatten().InnerExceptions)
+					logger.Error(inner_ex);
+			}
 			int downloads_finished = TotalNumberOfFilesToDownload - NumberOfFilesToDownload;
 			int downloads_in_progress = FileDownloadsInformation.Count(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
-			long bytes_of_completed_files = FileDownloadsInformation.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded == info.Value.TotalFileSize)).Sum(info => info.Value.TotalBytesDownloaded);
+			long bytes_of_completed_files = FileDownloadsInformation
+				.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded == info.Value.TotalFileSize))
+				.Sum(info => info.Value.TotalBytesDownloaded);
 			string canceled_files_message = "";
 			if (download_canceled)
 			{
@@ -329,9 +330,10 @@ public static partial class BDSM
 				$"{Pluralize(OpTimer.Elapsed.Seconds, " second")}[/].");
 			LogMarkupText(logger, LogLevel.Info,$"Average speed: [orchid2]{FormatBytes(TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s[/]");
 		}
+		if (!FilesToDownload.IsEmpty) RaiseInternalFault(logger, $"There are still {Pluralize(FilesToDownload.Count, " file")} after processing.");
 		LogMarkupText(logger, LogLevel.Info,"Finished updating.");
 		if (UserConfig.PromptToContinue)
-			PromptUserToContinue();
+			PromptBeforeExit();
 		return 0;
 	}
 }

@@ -19,7 +19,7 @@ internal static class LoggingConfiguration
 			config = new();
 			NLog.Targets.FileTarget default_logfile_config = new("logfile")
 				{
-					Layout = NLog.Layouts.Layout.FromString("[${longdate}] ${level}: ${message}"),
+					Layout = NLog.Layouts.Layout.FromString("[${longdate}] ${level}: ${message}${exception:format=StackTrace,Data}"),
 					FileName = "BDSM.log",
 					Footer = NLog.Layouts.Layout.FromString("== End BDSM log =="),
 					ArchiveOldFileOnStartupAboveSize = 1024 * 1024
