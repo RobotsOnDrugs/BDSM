@@ -7,7 +7,7 @@ namespace BDSM;
 
 public static class UtilityFunctions
 {
-	public static ConcurrentBag<PathMapping> GetPathMappingsFromSkipScanConfig(SkipScanConfiguration config, UserConfiguration userconfig)
+	public static ConcurrentBag<PathMapping> GetPathMappingsFromSkipScanConfig(SkipScanConfiguration config, FullUserConfiguration userconfig)
 	{
 		ConcurrentBag<PathMapping> _mappings = new();
 		foreach (string pathmap in config.FileMappings)

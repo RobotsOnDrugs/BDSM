@@ -1,5 +1,7 @@
 ﻿using System.Collections.Immutable;
 
+using FluentFTP;
+
 using static BDSM.Configuration;
 
 namespace BDSM;
@@ -12,6 +14,22 @@ public static class BetterRepackRepositoryDefinitions
 				Name = "Sideloader Modpack",
 				RemoteRelativePath = "mods/Sideloader Modpack",
 				LocalRelativePath = "mods\\Sideloader Modpack",
+				DeleteClientFiles = true
+			}
+		},
+		{ "Sideloader Modpack - Exclusive HS2", new ModpackDefinition
+			{
+				Name = "Sideloader Modpack - Exclusive HS2",
+				RemoteRelativePath = "mods/Sideloader Modpack - Exclusive HS2",
+				LocalRelativePath = "mods\\Sideloader Modpack - Exclusive HS2",
+				DeleteClientFiles = true
+			}
+		},
+		{ "Sideloader Modpack - Exclusive AIS", new ModpackDefinition
+			{
+				Name = "Sideloader Modpack - Exclusive AIS",
+				RemoteRelativePath = "mods/Sideloader Modpack - Exclusive AIS",
+				LocalRelativePath = "mods\\Sideloader Modpack - Exclusive AIS",
 				DeleteClientFiles = true
 			}
 		},
@@ -83,7 +101,10 @@ public static class BetterRepackRepositoryDefinitions
 	public static readonly ImmutableHashSet<string> CommonModpacks = new HashSet<string> { "Sideloader Modpack", "Sideloader Modpack - Maps", "Sideloader Modpack - MaterialEditor Shaders", "Sideloader Modpack - Uncensor Selector" }.ToImmutableHashSet();
 	public const string BleedingEdgeModpackName = "Sideloader Modpack - Bleeding Edge";
 	public const string StudioModpackName = "Sideloader Modpack - Studio";
-	public static string UserDataModpackName(bool is_hs2) => is_hs2 ? "UserData (HS2)" : "UserData (AIS)";
+	public const string UserDataHS2ModpackName = "UserData (HS2)";
+	public const string UserDataAISModpackName = "UserData (AIS)";
+	public const string UserDataDirectoryName = "UserData";
+	public static string UserDataModpackName(bool is_hs2) => is_hs2 ? UserDataHS2ModpackName : UserDataAISModpackName;
 	public static ImmutableHashSet<string> ExclusiveModpacks(bool is_hs2) => is_hs2 ?
 		new HashSet<string> { "Sideloader Modpack - Exclusive HS2", "Sideloader Modpack - Maps (HS2 Game)" }.ToImmutableHashSet() : new HashSet<string> { "Sideloader Modpack - Exclusive AIS" }.ToImmutableHashSet();
 
@@ -97,7 +118,13 @@ public static class BetterRepackRepositoryDefinitions
 		RootPath = "/AI/",
 		MaxConnections = 5
 	};
-	public static ImmutableHashSet<string> GetDesiredModpackNames(bool is_hs2, bool userdata, bool studio, bool bleedingedge)
+	public static FtpConfig DefaultRepoConnectionConfig => new()
+	{
+		EncryptionMode = FtpEncryptionMode.Auto,
+		ValidateAnyCertificate = true,
+		LogToConsole = false,
+	};
+	public static ImmutableHashSet<string> GetDesiredModpackNames(bool is_hs2, bool studio, bool bleedingedge, bool userdata)
 	{
 		HashSet<string> desired_modpack_names = CommonModpacks.ToHashSet();
 		desired_modpack_names.UnionWith(ExclusiveModpacks(is_hs2));
@@ -108,5 +135,15 @@ public static class BetterRepackRepositoryDefinitions
 		if (bleedingedge)
 			_ = desired_modpack_names.Add(BleedingEdgeModpackName);
 		return desired_modpack_names.ToImmutableHashSet();
+	}
+	public static ImmutableHashSet<PathMapping> ModpackNamesToPathMappings(IEnumerable<string> modpack_names, string gamepath, string rootpath)
+	{
+		HashSet<PathMapping> modpack_pathmaps = new();
+		foreach (string modpack_name in modpack_names)
+		{
+			ModpackDefinition definition = AllBasePathMappings[modpack_name];
+			_ = modpack_pathmaps.Add(ModpackDefinitionToPathMapping(definition, gamepath, rootpath));
+		}
+		return modpack_pathmaps.ToImmutableHashSet();
 	}
 }

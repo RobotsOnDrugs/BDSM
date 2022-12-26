@@ -39,12 +39,6 @@
 	<None Update="SkipScan.yaml">
 	  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
 	</None>
-	<None Update="UserConfiguration.yaml">
-	  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
-	<None Update="UserConfiguration.example.yaml">
-	  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
   </ItemGroup>
 
 </Project>

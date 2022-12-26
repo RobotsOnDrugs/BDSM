@@ -8,13 +8,17 @@ using FluentFTP;
 using NLog;
 
 using YamlDotNet.Serialization;
+using YamlDotNet.Core;
+
+using Spectre.Console;
 
 using static BDSM.FTPFunctions;
 using static BDSM.DownloadProgress;
 using static BDSM.UtilityFunctions;
 using static BDSM.Exceptions;
 using static BDSM.LoggingConfiguration;
-using Spectre.Console;
+using static BDSM.Configuration;
+using static BDSM.BetterRepackRepositoryDefinitions;
 
 namespace BDSM;
 
@@ -67,6 +71,48 @@ public static partial class BDSM
 				all_faulted = false;
 		return all_faulted ? throw new AggregateException(exceptions) : finished_tasks;
 	}
+	private static FullUserConfiguration GenerateNewUserConfig()
+	{
+		string gamepath;
+		bool is_hs2;
+		bool studio;
+		bool bleedingedge;
+		bool userdata;
+		bool prompt_to_continue;
+		while (true)
+		{
+			gamepath = AnsiConsole.Ask<string>("Where is your game located? (e.g. [turquoise2]D:\\HS2[/])");
+			bool? _is_hs2 = GamePathIsHS2(gamepath);
+			if (_is_hs2 is not null)
+			{
+				is_hs2 = (bool)_is_hs2;
+				AnsiConsole.MarkupLine($"[green]Looks like {(is_hs2 ? "Honey Select 2" : "AI-Shoujo")}[/]");
+			}
+			else
+			{
+				AnsiConsole.MarkupLine($"{gamepath} doesn't appear to be a valid game directory.");
+				if (AnsiConsole.Confirm("Enter a new game folder?"))
+					continue;
+				throw new OperationCanceledException("User canceled user configuration creation.");
+			}
+			studio = AnsiConsole.Confirm("Download studio mods?", false);
+			bleedingedge = AnsiConsole.Confirm("Download bleeding edge mods? (Warning: these can break things)", false);
+			userdata = AnsiConsole.Confirm("Download Modpack user data?", true);
+			prompt_to_continue = AnsiConsole.Confirm("Pause between steps to review information? (recommended)", true);
+			ImmutableHashSet<string> desired_modpacks = GetDesiredModpackNames(is_hs2, userdata, studio, bleedingedge);
+			RepoConnectionInfo connection_info = DefaultConnectionInfo;
+			FullUserConfiguration userconfig = new()
+			{
+				GamePath = gamepath,
+				ConnectionInfo = connection_info,
+				BasePathMappings = ModpackNamesToPathMappings(desired_modpacks, gamepath, connection_info.RootPath),
+				PromptToContinue = prompt_to_continue
+			};
+			SerializeUserConfiguration(FullUserConfigurationToSimple(userconfig));
+			AnsiConsole.MarkupLine("[green]New user configuration successfully created![/]");
+			return userconfig;
+		}
+	}
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleOutputCP(uint wCodePageID);
@@ -85,11 +131,47 @@ public static partial class BDSM
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
 
-		Configuration.UserConfiguration UserConfig = await Configuration.GetUserConfigurationAsync();
-		if (UserConfig.GamePath == @"X:\Your HoneySelect 2 DX folder here\")
+		FullUserConfiguration UserConfig;
+		try { UserConfig = await GetUserConfigurationAsync(); }
+		catch (UserConfigurationException ex)
 		{
-			LogMarkupText(logger, LogLevel.Error,"[red3]Your mod directory has not been set.[/]");
-			PromptBeforeExit();
+			Exception inner_ex = ex.InnerException!;
+			switch (inner_ex)
+			{
+				case FileNotFoundException:
+					if (AnsiConsole.Confirm("No configuration file found. Create one now?"))
+					{
+						try { UserConfig = GenerateNewUserConfig(); }
+						catch (OperationCanceledException)
+						{
+							LogMarkupText(logger, LogLevel.Fatal, "[gold3_1]No configuration file was found and the creation of a new one was canceled.[/]");
+							return 1;
+						}
+					}
+					else
+					{
+						LogMarkupText(logger, LogLevel.Fatal, "[gold3_1]No configuration file was found and the creation of a new one was canceled.[/]");
+						return 1;
+					}
+					break;
+				case TypeInitializationException or YamlException:
+					UserConfig = await GetOldUserConfigurationAsync();
+					try { SerializeUserConfiguration(FullUserConfigurationToSimple(UserConfig)); }
+					catch (Exception serial_ex)
+					{
+						logger.Warn(serial_ex);
+						AnsiConsole.MarkupLine("[red3]Could not write the new configuration file. See BDSM.log for details.[/]");
+					}
+					LogMarkupText(logger, LogLevel.Info, "[turquoise2]Old configuration file was converted to the new simplified format.[/]");
+					break;
+				default:
+					throw;
+			}
+		}
+
+		if (GamePathIsHS2(UserConfig.GamePath) is null)
+		{
+			LogMarkupText(logger, LogLevel.Error, $"Your game path {UserConfig.GamePath.EscapeMarkup()} is not valid");
 			return 1;
 		}
 
@@ -103,7 +185,7 @@ public static partial class BDSM
 		bool SkipScan = false;
 #if DEBUG
 		SkipScanConfiguration _skip_config = File.Exists(SKIP_SCAN_CONFIG_FILENAME)
-			? new Deserializer().Deserialize<SkipScanConfiguration>(Configuration.ReadConfigAndDispose(SKIP_SCAN_CONFIG_FILENAME))
+			? new Deserializer().Deserialize<SkipScanConfiguration>(ReadConfigAndDispose(SKIP_SCAN_CONFIG_FILENAME))
 			: new() { SkipScan = false, FileMappings = Array.Empty<string>() };
 		SkipScan = _skip_config.SkipScan;
 

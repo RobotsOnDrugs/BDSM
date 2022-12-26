@@ -9,19 +9,9 @@ namespace BDSM;
 public static class FTPFunctions
 {
 	private static readonly ConcurrentDictionary<int, bool> ScanQueueWaitStatus = new();
-	public static FtpConfig SideloaderConfig => new()
-	{
-		EncryptionMode = FtpEncryptionMode.Auto,
-		ValidateAnyCertificate = true,
-		LogToConsole = false,
-	};
-	public static FtpClient DefaultSideloaderClient(Configuration.RepoConnectionInfo repoinfo) =>
-		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = SideloaderConfig, Encoding = Encoding.UTF8 };
-	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo)
-	{
-		FtpClient client = DefaultSideloaderClient(repoinfo);
-		return client;
-	}
+	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo) =>
+		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
+	public static FtpClient DefaultSideloaderClient() => SetupFTPClient(BetterRepackRepositoryDefinitions.DefaultConnectionInfo);
 	public static bool TryConnect(FtpClient client, int max_retries = 3)
 	{
 		bool success = false;

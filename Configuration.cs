@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text;
 
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
 namespace BDSM;
@@ -16,11 +17,23 @@ public record Configuration
 		public required bool PromptToContinue { get; init; }
 		public required string[] BaseSideloaderDirectories { get; init; }
 	}
-	public readonly record struct UserConfiguration
+	public readonly record struct FullUserConfiguration
 	{
 		public required string GamePath { get; init; }
 		public required RepoConnectionInfo ConnectionInfo { get; init; }
 		public required ImmutableHashSet<PathMapping> BasePathMappings { get; init; }
+		public required bool PromptToContinue { get; init; }
+	}
+	public readonly record struct SimpleUserConfiguration
+	{
+		public readonly record struct DesiredOptionalModpacks
+		{
+			public required bool Studio { get; init; }
+			public required bool BleedingEdge { get; init; }
+			public required bool Userdata { get; init; }
+		}
+		public required string GamePath { get; init; }
+		public required DesiredOptionalModpacks OptionalModpacks { get; init; }
 		public required bool PromptToContinue { get; init; }
 	}
 	public readonly record struct RepoConnectionInfo
@@ -43,7 +56,7 @@ public record Configuration
 	}
 	public static string ReadConfigAndDispose(string filename) { using StreamReader reader = File.OpenText(filename); return reader.ReadToEnd(); }
 	public static async Task<string> ReadConfigAndDisposeAsync(string filename) { using StreamReader reader = File.OpenText(filename); return await reader.ReadToEndAsync(); }
-	public static async Task<UserConfiguration> GetUserConfigurationAsync()
+	public static async Task<FullUserConfiguration> GetOldUserConfigurationAsync()
 	{
 		Deserializer yaml_deserializer = new();
 
@@ -59,15 +72,88 @@ public record Configuration
 			};
 			throw new UserConfigurationException(ucex_message, ex);
 		}
-
+		return ConvertOldUserConfig(old_config);
+	}
+	public static async Task<FullUserConfiguration> GetUserConfigurationAsync()
+	{
+		Deserializer yaml_deserializer = new();
+		SimpleUserConfiguration simple_config;
+		try { simple_config = yaml_deserializer.Deserialize<SimpleUserConfiguration>(await ReadConfigAndDisposeAsync(USER_CONFIG_FILENAME)); }
+		catch (Exception ex)
+		{
+			throw ex switch
+			{
+				FileNotFoundException => new UserConfigurationException("Configuration file is missing.", ex),
+				TypeInitializationException or YamlException => new UserConfigurationException("Configuration file is malformed.", ex),
+				_ => new UserConfigurationException("Unspecified error loading user configuration.", ex)
+			};
+		}
+		return SimpleUserConfigurationToFull(simple_config);
+	}
+	public static void SerializeUserConfiguration(SimpleUserConfiguration userconfig)
+	{
+		string yaml_config = new Serializer().Serialize(userconfig);
+		using StreamWriter config_file_writer = File.CreateText(USER_CONFIG_FILENAME);
+		config_file_writer.Write(yaml_config);
+	}
+	public static bool? GamePathIsHS2(string path)
+	{
+		DirectoryInfo gamedir = new(path);
+		if (!gamedir.Exists)
+			return null;
+		foreach (FileInfo fileinfo in gamedir.EnumerateFiles())
+		{
+			if (fileinfo.Name is "HoneySelect2.exe") return true;
+			else if (fileinfo.Name is "AI-Shoujo.exe") return false;
+		}
+		return null;
+	}
+	public static SimpleUserConfiguration FullUserConfigurationToSimple(FullUserConfiguration full_config)
+	{
+		bool studio = false;
+		bool bleedingedge = false;
+		bool userdata = false;
+		foreach (PathMapping pm in full_config.BasePathMappings)
+		{
+			if (pm.FileName == BetterRepackRepositoryDefinitions.BleedingEdgeModpackName)
+				bleedingedge = true;
+			if (pm.FileName == BetterRepackRepositoryDefinitions.StudioModpackName)
+				studio = true;
+			if (pm.FileName == BetterRepackRepositoryDefinitions.UserDataDirectoryName)
+				userdata = true;
+		}
+		SimpleUserConfiguration.DesiredOptionalModpacks modpack_config = new() { Studio = studio, BleedingEdge = bleedingedge, Userdata = userdata };
+		return new() { GamePath = full_config.GamePath, PromptToContinue = full_config.PromptToContinue, OptionalModpacks = modpack_config };
+	}
+	public static FullUserConfiguration SimpleUserConfigurationToFull(SimpleUserConfiguration simple_config)
+	{
+		bool is_hs2;
+		bool studio;
+		bool bleedingedge;
+		bool userdata;
+		bool? _is_hs2 = GamePathIsHS2(simple_config.GamePath);
+		is_hs2 = _is_hs2 is not null
+			? (bool)_is_hs2
+			: throw new UserConfigurationException($"{simple_config.GamePath} is not a valid HS2 or AIS game directory.");
+		studio = simple_config.OptionalModpacks.Studio;
+		bleedingedge = simple_config.OptionalModpacks.BleedingEdge;
+		userdata = simple_config.OptionalModpacks.Userdata;
+		ImmutableHashSet<string> modpack_names = BetterRepackRepositoryDefinitions.GetDesiredModpackNames(is_hs2, studio, bleedingedge, userdata);
 		return new()
+		{
+			GamePath = simple_config.GamePath,
+			ConnectionInfo = BetterRepackRepositoryDefinitions.DefaultConnectionInfo,
+			BasePathMappings = BetterRepackRepositoryDefinitions.ModpackNamesToPathMappings(modpack_names, simple_config.GamePath, BetterRepackRepositoryDefinitions.DefaultConnectionInfo.RootPath),
+			PromptToContinue = simple_config.PromptToContinue
+		};
+	}
+	public static FullUserConfiguration ConvertOldUserConfig(OldUserConfiguration old_config) => new()
 		{
 			GamePath = old_config.GamePath,
 			ConnectionInfo = BetterRepackRepositoryDefinitions.DefaultConnectionInfo,
 			PromptToContinue = old_config.PromptToContinue,
 			BasePathMappings = GetPathMappingsFromOldUserConfig(old_config)
 		};
-	}
 	public static ImmutableHashSet<PathMapping> GetPathMappingsFromOldUserConfig(OldUserConfiguration userconfig)
 	{
 		ImmutableHashSet<PathMapping>.Builder _pathmapping_builder = ImmutableHashSet.CreateBuilder<PathMapping>();
