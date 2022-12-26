@@ -1,0 +1,28 @@
+name: Bug Report
+description: Report errors or unexpected behavior
+title: "[Bug] "
+labels: [bug]
+assignees:
+  - RobotsOnDrugs
+body:
+- type: textarea
+  attributes:
+    label: Problem behavior
+    description: Describe the issue and paste the end of your BDSM.log here.
+    placeholder: What happened? What errors did you encounter?
+  validations:
+    required: true
+
+- type: textarea
+  attributes:
+    label: Expected behavior
+    placeholder: What should have happened instead?
+  validations:
+    required: false
+
+- type: textarea
+  attributes:
+    label: Steps to reproduce
+    placeholder: What are the conditions required to trigger the bug?
+  validations:
+    required: false
