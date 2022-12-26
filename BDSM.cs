@@ -258,6 +258,7 @@ public static partial class BDSM
 		foreach (PathMapping pm in BaseDirectoriesToScan)
 		{
 			DirectoryInfo base_dir_di = new(pm.LocalFullPath);
+			Directory.CreateDirectory(pm.LocalFullPath);
 			IEnumerable<FileInfo> file_enumeration = base_dir_di.EnumerateFiles("*", new EnumerationOptions() { RecurseSubdirectories = true, IgnoreInaccessible = true });
 			try
 			{

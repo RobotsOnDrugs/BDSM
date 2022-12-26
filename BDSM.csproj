@@ -28,7 +28,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-	<PackageReference Include="FluentFTP" Version="42.2.0" />
+	<PackageReference Include="FluentFTP" Version="43.0.1" />
 	<PackageReference Include="NLog" Version="5.1.0" />
 	<PackageReference Include="ShellProgressBar" Version="5.2.0" />
 	<PackageReference Include="Spectre.Console" Version="0.45.1-preview.0.47" />
