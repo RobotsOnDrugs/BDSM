@@ -219,17 +219,6 @@ public static partial class BDSM
 		Stopwatch OpTimer = new();
 		LogMarkupText(logger, LogLevel.Info, "Scanning the server.");
 		OpTimer.Start();
-		List<string> bad_entries = SanityCheckBaseDirectories(BaseDirectoriesToScan, UserConfig.ConnectionInfo);
-		if (bad_entries.Count > 0)
-		{
-			foreach (string bad_entry in bad_entries)
-				LogMarkupText(logger, LogLevel.Error,$"[red][bold]'{bad_entry}'[/] does not exist on the server. Are your remote paths configured correctly?[/]");
-			OpTimer.Stop();
-			if (UserConfig.PromptToContinue)
-				PromptBeforeExit();
-			return 1;
-		}
-
 		List<Task> scan_tasks = new();
 		List<Task> finished_scan_tasks = new();
 		using CancellationTokenSource scan_cts = new();

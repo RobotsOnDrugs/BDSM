@@ -72,16 +72,12 @@ public static class UtilityFunctions
 		};
 	}
 	public static string Pluralize(int quantity, string suffix) => quantity == 1 ? quantity.ToString() + suffix : quantity.ToString() + suffix + "s";
-	public static void PromptUserToContinue()
+	public static void PromptUser(string message)
 	{
-		const string message = "Press any key to continue or Ctrl-C to abort";
 		Console.Write(message);
 		_ = Console.ReadKey(true);
 		Console.Write('\r' + new string(' ', message.Length) + '\r');
 	}
-	public static void PromptBeforeExit()
-	{
-		Console.WriteLine("Press any key to exit.");
-		_ = Console.ReadKey(true);
-	}
+	public static void PromptUserToContinue() => PromptUser("Press any key to continue or Ctrl-C to abort");
+	public static void PromptBeforeExit() => PromptUser("Press any key to exit.");
 }

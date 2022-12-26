@@ -133,6 +133,8 @@ public static class FTPFunctions
 		}
 		scanclient.Dispose();
 	}
+
+	[Obsolete("This should no longer be needed with the new simplified configuration and is likely to be removed in a future release.")]
 	public static List<string> SanityCheckBaseDirectories(IEnumerable<PathMapping> entries_to_check, Configuration.RepoConnectionInfo repoinfo)
 	{
 		List<string> bad_entries = new();
