@@ -78,6 +78,6 @@ public static class UtilityFunctions
 		_ = Console.ReadKey(true);
 		Console.Write('\r' + new string(' ', message.Length) + '\r');
 	}
-	public static void PromptUserToContinue() => PromptUser("Press any key to continue or Ctrl-C to abort");
+	public static void PromptUserToContinue() => PromptUser("Press any key to continue or Ctrl-C to abort.");
 	public static void PromptBeforeExit() => PromptUser("Press any key to exit.");
 }

@@ -15,104 +15,13 @@ using Spectre.Console;
 using static BDSM.FTPFunctions;
 using static BDSM.DownloadProgress;
 using static BDSM.UtilityFunctions;
-using static BDSM.Exceptions;
 using static BDSM.LoggingConfiguration;
 using static BDSM.Configuration;
-using static BDSM.BetterRepackRepositoryDefinitions;
 
 namespace BDSM;
 
 public static partial class BDSM
 {
-#if DEBUG
-	private static void RaiseInternalFault(ILogger logger, string message) { logger.Debug(message); Debugger.Break(); }
-#else
-	private static void RaiseInternalFault(ILogger logger, string message)
-	{
-		BDSMInternalFaultException int_ex = new(message);
-		LogException(logger, int_ex);
-		throw int_ex;
-	}
-#endif
-
-	private static List<Task> ProcessTasks(List<Task> tasks, CancellationTokenSource cts)
-	{
-		bool canceled = false;
-		bool all_faulted = true;
-		void CtrlCHandler(object sender, ConsoleCancelEventArgs args) { cts.Cancel(); canceled = true; args.Cancel = true; }
-		Console.CancelKeyPress += CtrlCHandler!;
-		List<Task> finished_tasks = new(tasks.Count);
-		List<AggregateException> exceptions = new();
-		while (tasks.Count != 0)
-		{
-			int completed_task_idx = Task.WaitAny(tasks.ToArray());
-			Task completed_task = tasks[completed_task_idx];
-			switch (completed_task.Status)
-			{
-				case TaskStatus.RanToCompletion or TaskStatus.Canceled:
-					break;
-				case TaskStatus.Faulted:
-					AggregateException taskex = completed_task.Exception!;
-					exceptions.Add(taskex);
-					if (taskex.InnerException is not FTPConnectionException)
-						cts.Cancel();
-					break;
-				default:
-					exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing task exceptions.")));
-					break;
-			}
-			finished_tasks.Add(completed_task);
-			tasks.RemoveAt(completed_task_idx);
-		}
-		Console.CancelKeyPress -= CtrlCHandler!;
-		if (canceled) throw new OperationCanceledException();
-		foreach (Task task in finished_tasks)
-			if (task.Status == TaskStatus.RanToCompletion)
-				all_faulted = false;
-		return all_faulted ? throw new AggregateException(exceptions) : finished_tasks;
-	}
-	private static FullUserConfiguration GenerateNewUserConfig()
-	{
-		string gamepath;
-		bool is_hs2;
-		bool studio;
-		bool bleedingedge;
-		bool userdata;
-		bool prompt_to_continue;
-		while (true)
-		{
-			gamepath = AnsiConsole.Ask<string>("Where is your game located? (e.g. [turquoise2]D:\\HS2[/])");
-			bool? _is_hs2 = GamePathIsHS2(gamepath);
-			if (_is_hs2 is not null)
-			{
-				is_hs2 = (bool)_is_hs2;
-				AnsiConsole.MarkupLine($"[green]Looks like {(is_hs2 ? "Honey Select 2" : "AI-Shoujo")}[/]");
-			}
-			else
-			{
-				AnsiConsole.MarkupLine($"{gamepath} doesn't appear to be a valid game directory.");
-				if (AnsiConsole.Confirm("Enter a new game folder?"))
-					continue;
-				throw new OperationCanceledException("User canceled user configuration creation.");
-			}
-			studio = AnsiConsole.Confirm("Download studio mods?", false);
-			bleedingedge = AnsiConsole.Confirm("Download bleeding edge mods? (Warning: these can break things)", false);
-			userdata = AnsiConsole.Confirm("Download Modpack user data?", true);
-			prompt_to_continue = AnsiConsole.Confirm("Pause between steps to review information? (recommended)", true);
-			ImmutableHashSet<string> desired_modpacks = GetDesiredModpackNames(is_hs2, userdata, studio, bleedingedge);
-			RepoConnectionInfo connection_info = DefaultConnectionInfo;
-			FullUserConfiguration userconfig = new()
-			{
-				GamePath = gamepath,
-				ConnectionInfo = connection_info,
-				BasePathMappings = ModpackNamesToPathMappings(desired_modpacks, gamepath, connection_info.RootPath),
-				PromptToContinue = prompt_to_continue
-			};
-			SerializeUserConfiguration(FullUserConfigurationToSimple(userconfig));
-			AnsiConsole.MarkupLine("[green]New user configuration successfully created![/]");
-			return userconfig;
-		}
-	}
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleOutputCP(uint wCodePageID);
@@ -132,38 +41,29 @@ public static partial class BDSM
 		_ = SetConsoleCP(65001);
 
 		FullUserConfiguration UserConfig;
-		try { UserConfig = await GetUserConfigurationAsync(); }
+		const string CurrentConfigVersion = "0.3.2";
+		string user_config_version = CurrentConfigVersion;
+		try { UserConfig = GetUserConfiguration(out user_config_version); }
 		catch (UserConfigurationException ex)
 		{
-			Exception inner_ex = ex.InnerException!;
-			switch (inner_ex)
+			switch (ex.InnerException)
 			{
 				case FileNotFoundException:
 					if (AnsiConsole.Confirm("No configuration file found. Create one now?"))
 					{
-						try { UserConfig = GenerateNewUserConfig(); }
-						catch (OperationCanceledException)
-						{
-							LogMarkupText(logger, LogLevel.Fatal, "[gold3_1]No configuration file was found and the creation of a new one was canceled.[/]");
-							return 1;
-						}
+						try { UserConfig = GenerateNewUserConfig(); break; }
+						catch (OperationCanceledException) { }
 					}
-					else
-					{
-						LogMarkupText(logger, LogLevel.Fatal, "[gold3_1]No configuration file was found and the creation of a new one was canceled.[/]");
-						return 1;
-					}
-					break;
+					LogMarkupText(logger, LogLevel.Fatal, "[gold3_1]No configuration file was found and the creation of a new one was canceled.[/]");
+					return 1;
 				case TypeInitializationException or YamlException:
 					UserConfig = await GetOldUserConfigurationAsync();
-					try { SerializeUserConfiguration(FullUserConfigurationToSimple(UserConfig)); }
-					catch (Exception serial_ex)
-					{
-						logger.Warn(serial_ex);
-						AnsiConsole.MarkupLine("[red3]Could not write the new configuration file. See BDSM.log for details.[/]");
-					}
-					LogMarkupText(logger, LogLevel.Info, "[turquoise2]Old configuration file was converted to the new simplified format.[/]");
+					user_config_version = "0.1";
 					break;
+				case null:
+					LogMarkupText(logger, LogLevel.Fatal, $"[red3]{ex.Message.EscapeMarkup()}[/]");
+					PromptBeforeExit();
+					return 1;
 				default:
 					throw;
 			}
@@ -175,6 +75,38 @@ public static partial class BDSM
 			return 1;
 		}
 
+		if (user_config_version != CurrentConfigVersion)
+		{
+			try
+			{
+				SerializeUserConfiguration(FullUserConfigurationToSimple(UserConfig));
+				LogMarkupText(logger, LogLevel.Info, $"[turquoise2]Configuration file was updated from {user_config_version} to the {CurrentConfigVersion} format.[/]");
+			}
+			catch (Exception serial_ex)
+			{
+				logger.Warn(serial_ex);
+				AnsiConsole.MarkupLine("[gold3_1]Your configuration was updated, but the new configuration file could not be written. See BDSM.log for details.[/]");
+				PromptUserToContinue();
+			}
+			AnsiConsole.MarkupLine("[turquoise2]See [link]https://github.com/RobotsOnDrugs/BDSM/wiki/User-Configuration[/] for more details on the new format.[/]");
+		}
+		switch (user_config_version)
+		{
+			case CurrentConfigVersion:
+				break;
+			case "0.3":
+				SimpleUserConfiguration simple_config = FullUserConfigurationToSimple(UserConfig);
+				string studio_mod_download_state = simple_config.OptionalModpacks.Studio ? "both packs" : "neither pack";
+				LogMarkupText(logger, LogLevel.Warn, "[gold3_1]Notice: Downloading extra studio maps was turned on by default in 0.3, but is now turned on by default only if studio mods are also being downloaded.[/]");
+				LogMarkupText(logger, LogLevel.Warn, $"[gold3_1]With your configuration, {studio_mod_download_state} will be downloaded. If you wish to change this, you may exit now and edit UserConfiguration.yaml to your liking.[/]");
+				PromptUserToContinue();
+				break;
+			case "0.1":
+				LogMarkupText(logger, LogLevel.Warn, "[gold3_1]Notice: As of 0.3, server connection info and server path mappings and sync behavior are no longer in the user configuration. If you have a good use case for customizing these, file a feature request on GitHub.[/]");
+				break;
+			default:
+				throw new Exceptions.BDSMInternalFaultException();
+		}
 		ImmutableHashSet<PathMapping> BaseDirectoriesToScan;
 		ConcurrentBag<PathMapping> DirectoriesToScan = new();
 		ConcurrentDictionary<string, PathMapping> FilesOnServer = new();

@@ -4,12 +4,12 @@ using System.Text;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
+using static BDSM.BetterRepackRepositoryDefinitions;
+
 namespace BDSM;
 public record Configuration
 {
 	internal const string USER_CONFIG_FILENAME = "UserConfiguration.yaml";
-	internal const bool USE_OLD_CONFIG = true;
-
 	public readonly record struct OldUserConfiguration
 	{
 		public required string GamePath { get; init; }
@@ -24,16 +24,47 @@ public record Configuration
 		public required ImmutableHashSet<PathMapping> BasePathMappings { get; init; }
 		public required bool PromptToContinue { get; init; }
 	}
+	internal readonly record struct RawUserConfiguration
+	{
+		public readonly record struct Modpacks
+		{
+			public bool? Main { get; init; }
+			public bool? MEShaders { get; init; }
+			public bool? UncensorSelector { get; init; }
+			public bool? Exclusive { get; init; }
+			public bool? StudioMaps { get; init; }
+			public bool? HS2Maps { get; init; }
+			public bool? Studio { get; init; }
+			public bool? BleedingEdge { get; init; }
+			public bool? Userdata { get; init; }
+		}
+		public string? GamePath { get; init; }
+		public Modpacks? OptionalModpacks { get; init; }
+		public bool? PromptToContinue { get; init; }
+	}
 	public readonly record struct SimpleUserConfiguration
 	{
-		public readonly record struct DesiredOptionalModpacks
+		public readonly record struct Modpacks
 		{
+			public Modpacks ()
+			{
+				Main = true;
+				MEShaders = true;
+				UncensorSelector = true;
+				Exclusive = true;
+			}
+			public bool Main { get; init; }
+			public bool MEShaders { get; init; }
+			public bool UncensorSelector { get; init; }
+			public bool Exclusive { get; init; }
+			public required bool StudioMaps { get; init; }
+			public required bool HS2Maps { get; init; }
 			public required bool Studio { get; init; }
 			public required bool BleedingEdge { get; init; }
 			public required bool Userdata { get; init; }
 		}
 		public required string GamePath { get; init; }
-		public required DesiredOptionalModpacks OptionalModpacks { get; init; }
+		public required Modpacks OptionalModpacks { get; init; }
 		public required bool PromptToContinue { get; init; }
 	}
 	public readonly record struct RepoConnectionInfo
@@ -74,11 +105,12 @@ public record Configuration
 		}
 		return ConvertOldUserConfig(old_config);
 	}
-	public static async Task<FullUserConfiguration> GetUserConfigurationAsync()
+	public static FullUserConfiguration GetUserConfiguration(out string config_version)
 	{
+		Dictionary<string, string> _upgrade_info = new();
 		Deserializer yaml_deserializer = new();
-		SimpleUserConfiguration simple_config;
-		try { simple_config = yaml_deserializer.Deserialize<SimpleUserConfiguration>(await ReadConfigAndDisposeAsync(USER_CONFIG_FILENAME)); }
+		RawUserConfiguration raw_config;
+		try { raw_config = yaml_deserializer.Deserialize<RawUserConfiguration>(ReadConfigAndDispose(USER_CONFIG_FILENAME)); }
 		catch (Exception ex)
 		{
 			throw ex switch
@@ -88,7 +120,30 @@ public record Configuration
 				_ => new UserConfigurationException("Unspecified error loading user configuration.", ex)
 			};
 		}
+
+		SimpleUserConfiguration simple_config = ValidateRawUserConfiguration(raw_config, out config_version);
 		return SimpleUserConfigurationToFull(simple_config);
+	}
+	private static SimpleUserConfiguration ValidateRawUserConfiguration(RawUserConfiguration nullable_config, out string config_version)
+	{
+		if (nullable_config.GamePath is null)
+			throw new UserConfigurationException("GamePath is missing from the configuration file.");
+		bool is_hs2 = GamePathIsHS2(nullable_config.GamePath) ?? throw new UserConfigurationException($"{nullable_config.GamePath} is not a valid HS2 or AIS game directory.");
+		config_version = nullable_config.OptionalModpacks?.Main is null ? "0.3" : "0.3.2";
+		bool studio = nullable_config.OptionalModpacks?.Studio ?? false;
+		return new()
+		{
+			GamePath = nullable_config.GamePath,
+			OptionalModpacks = new()
+			{
+				Studio = studio,
+				StudioMaps = nullable_config.OptionalModpacks?.StudioMaps ?? studio,
+				HS2Maps = nullable_config.OptionalModpacks?.HS2Maps ?? is_hs2,
+				BleedingEdge = nullable_config.OptionalModpacks?.BleedingEdge ?? false,
+				Userdata = nullable_config.OptionalModpacks?.Userdata ?? true
+			},
+			PromptToContinue = nullable_config.PromptToContinue ?? true
+		};
 	}
 	public static void SerializeUserConfiguration(SimpleUserConfiguration userconfig)
 	{
@@ -110,50 +165,79 @@ public record Configuration
 	}
 	public static SimpleUserConfiguration FullUserConfigurationToSimple(FullUserConfiguration full_config)
 	{
+		bool main = false;
+		bool me_shaders = false;
+		bool uncensor_selector = false;
+		bool exclusive = false;
+		bool maps = false;
+		bool maps_hs2 = false;
 		bool studio = false;
 		bool bleedingedge = false;
 		bool userdata = false;
 		foreach (PathMapping pm in full_config.BasePathMappings)
 		{
-			if (pm.FileName == BetterRepackRepositoryDefinitions.BleedingEdgeModpackName)
-				bleedingedge = true;
-			if (pm.FileName == BetterRepackRepositoryDefinitions.StudioModpackName)
-				studio = true;
-			if (pm.FileName == BetterRepackRepositoryDefinitions.UserDataDirectoryName)
-				userdata = true;
+			switch (pm.FileName)
+			{
+				case MainModpackName:
+					main = true; break;
+				case MEShadersModpackName:
+					me_shaders = true; break;
+				case UncensorSelectorModpackName:
+					uncensor_selector = true; break;
+				case ExclusiveAISModpackName or ExclusiveHS2ModpackName:
+					exclusive = true; break;
+				case StudioMapsModpackName:
+					maps = true; break;
+				case HS2MapsModpackName:
+					maps_hs2 = true; break;
+				case BleedingEdgeModpackName:
+					bleedingedge = true; break;
+				case StudioModpackName:
+					studio = true; break;
+				case UserDataDirectoryName:
+					userdata = true; break;
+				default:
+					throw new ArgumentException($"The user configuration provided has invalid data. {pm.FileName} is not a valid modpack directory.");
+			}
 		}
-		SimpleUserConfiguration.DesiredOptionalModpacks modpack_config = new() { Studio = studio, BleedingEdge = bleedingedge, Userdata = userdata };
+		SimpleUserConfiguration.Modpacks modpack_config = new()
+		{
+			Main = main,
+			MEShaders = me_shaders,
+			UncensorSelector = uncensor_selector,
+			Exclusive = exclusive,
+			StudioMaps = maps,
+			HS2Maps = maps_hs2,
+			BleedingEdge = bleedingedge,
+			Studio = studio,
+			Userdata = userdata
+		};
 		return new() { GamePath = full_config.GamePath, PromptToContinue = full_config.PromptToContinue, OptionalModpacks = modpack_config };
 	}
 	public static FullUserConfiguration SimpleUserConfigurationToFull(SimpleUserConfiguration simple_config)
 	{
 		bool is_hs2;
-		bool studio;
-		bool bleedingedge;
-		bool userdata;
+		SimpleUserConfiguration.Modpacks desired_modpacks = simple_config.OptionalModpacks;
 		bool? _is_hs2 = GamePathIsHS2(simple_config.GamePath);
 		is_hs2 = _is_hs2 is not null
 			? (bool)_is_hs2
 			: throw new UserConfigurationException($"{simple_config.GamePath} is not a valid HS2 or AIS game directory.");
-		studio = simple_config.OptionalModpacks.Studio;
-		bleedingedge = simple_config.OptionalModpacks.BleedingEdge;
-		userdata = simple_config.OptionalModpacks.Userdata;
-		ImmutableHashSet<string> modpack_names = BetterRepackRepositoryDefinitions.GetDesiredModpackNames(is_hs2, studio, bleedingedge, userdata);
+		ImmutableHashSet<string> modpack_names = GetDesiredModpackNames(is_hs2, desired_modpacks);
 		return new()
 		{
 			GamePath = simple_config.GamePath,
-			ConnectionInfo = BetterRepackRepositoryDefinitions.DefaultConnectionInfo,
-			BasePathMappings = BetterRepackRepositoryDefinitions.ModpackNamesToPathMappings(modpack_names, simple_config.GamePath, BetterRepackRepositoryDefinitions.DefaultConnectionInfo.RootPath),
+			ConnectionInfo = DefaultConnectionInfo,
+			BasePathMappings = ModpackNamesToPathMappings(modpack_names, simple_config.GamePath, DefaultConnectionInfo.RootPath),
 			PromptToContinue = simple_config.PromptToContinue
 		};
 	}
 	public static FullUserConfiguration ConvertOldUserConfig(OldUserConfiguration old_config) => new()
-		{
-			GamePath = old_config.GamePath,
-			ConnectionInfo = BetterRepackRepositoryDefinitions.DefaultConnectionInfo,
-			PromptToContinue = old_config.PromptToContinue,
-			BasePathMappings = GetPathMappingsFromOldUserConfig(old_config)
-		};
+	{
+		GamePath = old_config.GamePath,
+		ConnectionInfo = DefaultConnectionInfo,
+		PromptToContinue = old_config.PromptToContinue,
+		BasePathMappings = GetPathMappingsFromOldUserConfig(old_config)
+	};
 	public static ImmutableHashSet<PathMapping> GetPathMappingsFromOldUserConfig(OldUserConfiguration userconfig)
 	{
 		ImmutableHashSet<PathMapping>.Builder _pathmapping_builder = ImmutableHashSet.CreateBuilder<PathMapping>();
@@ -177,14 +261,14 @@ public record Configuration
 		return _pathmapping_builder.ToImmutableHashSet();
 	}
 	public static PathMapping ModpackDefinitionToPathMapping(ModpackDefinition definition, string gamepath, string rootpath) => new()
-		{
-			RootPath = rootpath,
-			RemoteRelativePath = definition.RemoteRelativePath,
-			GamePath = gamepath,
-			LocalRelativePath = definition.LocalRelativePath,
-			FileSize = null,
-			DeleteClientFiles = definition.DeleteClientFiles
-		};
+	{
+		RootPath = rootpath,
+		RemoteRelativePath = definition.RemoteRelativePath,
+		GamePath = gamepath,
+		LocalRelativePath = definition.LocalRelativePath,
+		FileSize = null,
+		DeleteClientFiles = definition.DeleteClientFiles
+	};
 	public class ConfigurationException : Exception
 	{
 		public ConfigurationException() { }
