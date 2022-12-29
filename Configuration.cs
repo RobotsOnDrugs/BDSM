@@ -105,12 +105,17 @@ public record Configuration
 		}
 		return ConvertOldUserConfig(old_config);
 	}
-	public static FullUserConfiguration GetUserConfiguration(out string config_version)
+	public static FullUserConfiguration GetUserConfiguration(out string config_version, string? config_yaml = null)
 	{
 		Dictionary<string, string> _upgrade_info = new();
 		Deserializer yaml_deserializer = new();
 		RawUserConfiguration raw_config;
-		try { raw_config = yaml_deserializer.Deserialize<RawUserConfiguration>(ReadConfigAndDispose(USER_CONFIG_FILENAME)); }
+		try
+		{
+			raw_config = config_yaml is null
+				? yaml_deserializer.Deserialize<RawUserConfiguration>(ReadConfigAndDispose(USER_CONFIG_FILENAME))
+				: yaml_deserializer.Deserialize<RawUserConfiguration>(config_yaml);
+		}
 		catch (Exception ex)
 		{
 			throw ex switch
@@ -244,7 +249,10 @@ public record Configuration
 		foreach (string sideloaderdir in userconfig.BaseSideloaderDirectories)
 		{
 			string[] _sideloadersplit = sideloaderdir.Split(" | ");
-			bool _deletefiles = bool.Parse(_sideloadersplit[2]);
+			if (_sideloadersplit.Length != 3)
+				throw new UserConfigurationException("Modpack definition string is malformed.");
+			if (!bool.TryParse(_sideloadersplit[2], out bool _deletefiles))
+				throw new UserConfigurationException("Modpack definition string is malformed.");
 			PathMapping _pathmap = new()
 			{
 				RootPath = userconfig.ConnectionInfo.RootPath,

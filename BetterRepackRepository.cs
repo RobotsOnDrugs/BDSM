@@ -19,6 +19,19 @@ public static class BetterRepackRepositoryDefinitions
 	public const string UserDataHS2ModpackName = "UserData (HS2)";
 	public const string UserDataAISModpackName = "UserData (AIS)";
 	public const string UserDataDirectoryName = "UserData";
+	public static IEnumerable<string> DefaultModpackNames(bool is_hs2)
+	{
+		HashSet<string> desired_modpack_names = CommonModpacks.ToHashSet();
+		_ = desired_modpack_names.Add(ExclusiveModpack(is_hs2));
+		if (is_hs2)
+		{
+			_ = desired_modpack_names.Add(HS2MapsModpackName);
+			_ = desired_modpack_names.Add(UserDataHS2ModpackName);
+		}
+		else
+			_ = desired_modpack_names.Add(UserDataAISModpackName);
+		return desired_modpack_names;
+	}
 	public static readonly ImmutableDictionary<string, ModpackDefinition> AllBasePathMappings = new Dictionary<string, ModpackDefinition>()
 	{
 		{ MainModpackName, new ModpackDefinition

@@ -28,6 +28,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="BDSM.Tests\**" />
+    <EmbeddedResource Remove="BDSM.Tests\**" />
+    <None Remove="BDSM.Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
 	<PackageReference Include="FluentFTP" Version="43.0.1" />
 	<PackageReference Include="NLog" Version="5.1.0" />
 	<PackageReference Include="ShellProgressBar" Version="5.2.0" />
