@@ -262,8 +262,14 @@ public static partial class BDSM
 				TotalBytesToDownload += file_download.TotalFileSize;
 			LogMarkupText(logger, LogLevel.Info, $"[orchid2]{Pluralize(NumberOfFilesToDownload, " file")}[/] ([orchid2]{FormatBytes(TotalBytesToDownload)}[/]) to download.");
 
-			if (UserConfig.PromptToContinue)
+			bool display_summary_before = UserConfig.PromptToContinue && AnsiConsole.Confirm("Show summary?", true);
+			if (display_summary_before)
+			{
+				AnsiConsole.WriteLine("Files to download:");
+				foreach (FileDownload file_dl in FilesToDownload)
+					AnsiConsole.MarkupLine($"[deepskyblue1]{Path.GetRelativePath(UserConfig.GamePath, file_dl.LocalPath).EscapeMarkup()}[/] ([orchid2]{FormatBytes(file_dl.TotalFileSize)}[/])");
 				PromptUserToContinue();
+			}
 
 			OpTimer.Restart();
 			TrackTotalCurrentSpeed();
@@ -317,22 +323,38 @@ public static partial class BDSM
 				foreach (Exception inner_ex in download_failures.Flatten().InnerExceptions)
 					logger.Error(inner_ex);
 			}
-			int downloads_finished = TotalNumberOfFilesToDownload - NumberOfFilesToDownload;
-			int downloads_in_progress = FileDownloadsInformation.Count(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
+			int number_of_downloads_finished = TotalNumberOfFilesToDownload - NumberOfFilesToDownload;
+			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> queued_downloads = FileDownloadsInformation.Where(info => !info.Value.IsInitialized);
+			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> canceled_downloads = FileDownloadsInformation.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
+			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> completed_downloads = FileDownloadsInformation.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded == info.Value.TotalFileSize));
+			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> unfinished_downloads = queued_downloads.Concat(canceled_downloads);
 			long bytes_of_completed_files = FileDownloadsInformation
 				.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded == info.Value.TotalFileSize))
 				.Sum(info => info.Value.TotalBytesDownloaded);
-			string canceled_files_message = "";
 			if (download_canceled)
 			{
-				LogMarkupText(logger, LogLevel.Warn, $"Canceled download of [gold3_1]{Pluralize(downloads_in_progress, " file")}[/]" +
+				LogMarkupText(logger, LogLevel.Warn, $"Canceled download of [gold3_1]{Pluralize(unfinished_downloads.Count(), " file")}[/]" +
 					$" ([orchid2]{FormatBytes(TotalBytesDownloaded - bytes_of_completed_files)}[/] wasted).");
-				canceled_files_message = $" ([gold3_1]{downloads_in_progress} canceled[/])";
 			}
-			LogMarkupText(logger, LogLevel.Info, $"Completed download of [orchid2]{Pluralize(downloads_finished, " file")}[/] ([orchid2]{FormatBytes(bytes_of_completed_files)}[/])" +
+			LogMarkupText(logger, LogLevel.Info, $"Completed download of [orchid2]{Pluralize(number_of_downloads_finished, " file")}[/] ([orchid2]{FormatBytes(bytes_of_completed_files)}[/])" +
 				$" in [orchid2]{(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}" +
 				$"{Pluralize(OpTimer.Elapsed.Seconds, " second")}[/].");
-			LogMarkupText(logger, LogLevel.Info,$"Average speed: [orchid2]{FormatBytes(TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s[/]");
+			LogMarkupText(logger, LogLevel.Info, $"Average speed: [orchid2]{FormatBytes(TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s[/]");
+
+			bool display_summary = UserConfig.PromptToContinue && AnsiConsole.Confirm("Display file download summary?");
+			void LogSummary(string message)
+			{
+				if (display_summary) LogMarkupText(logger, LogLevel.Info, message);
+				else logger.Info(message);
+			}
+			if (unfinished_downloads.Any())
+				LogSummary("Canceled downloads:");
+			foreach (KeyValuePair<string, FileDownloadProgressInformation> canceled_path in unfinished_downloads.OrderBy(pm => pm.Key))
+				LogSummary($"[gold3_1]{Path.GetRelativePath(UserConfig.GamePath, canceled_path.Key).EscapeMarkup()}[/]");
+			if (completed_downloads.Any())
+				LogSummary("Completed downloads:");
+			foreach (KeyValuePair<string, FileDownloadProgressInformation> completed_path in completed_downloads.OrderBy(pm => pm.Key))
+				LogSummary($"[green]{Path.GetRelativePath(UserConfig.GamePath, completed_path.Key).EscapeMarkup()}[/]");
 		}
 		if (!FilesToDownload.IsEmpty) RaiseInternalFault(logger, $"There are still {Pluralize(FilesToDownload.Count, " file")} after processing.");
 		LogMarkupText(logger, LogLevel.Info,"Finished updating.");
