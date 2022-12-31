@@ -75,13 +75,13 @@ public static partial class BDSM
 					continue;
 				throw new OperationCanceledException("User canceled user configuration creation.");
 			}
-			bool studio = AnsiConsole.Confirm("Download studio mods?", false);
+			bool studio = AnsiConsole.Confirm("Download studio mods?", DefaultModpacksSimpleHS2.Studio);
 			bool studio_maps = AnsiConsole.Confirm("Download extra studio maps?", studio);
-			bool hs2_maps = is_hs2 && AnsiConsole.Confirm("Download extra main game maps?", true);
-			bool bleedingedge = AnsiConsole.Confirm("Download bleeding edge mods? (Warning: these can break things)", false);
-			bool userdata = AnsiConsole.Confirm("Download modpack user data such as character and clothing cards?", true);
-			bool prompt_to_continue = AnsiConsole.Confirm("Pause between steps to review information? (recommended)", true);
-			SimpleUserConfiguration.Modpacks desired_modpacks = new() { Studio = studio, StudioMaps = studio_maps, HS2Maps = hs2_maps, BleedingEdge = bleedingedge, Userdata = userdata };
+			bool hs2_maps = is_hs2 && AnsiConsole.Confirm("Download extra main game maps?", DefaultModpacksSimpleHS2.StudioMaps);
+			bool bleedingedge = AnsiConsole.Confirm("Download bleeding edge mods? (Warning: these can break things)", DefaultModpacksSimpleHS2.BleedingEdge);
+			bool userdata = AnsiConsole.Confirm("Download modpack user data such as character and clothing cards?", DefaultModpacksSimpleHS2.Userdata);
+			bool prompt_to_continue = AnsiConsole.Confirm("Pause between steps to review information? (recommended)", DefaultPromptToContinue);
+			SimpleUserConfiguration.Modpacks desired_modpacks = DefaultModpacksSimpleHS2 with { Studio = studio, StudioMaps = studio_maps, HS2Maps = hs2_maps, BleedingEdge = bleedingedge, Userdata = userdata };
 			ImmutableHashSet<string> desired_modpack_names = GetDesiredModpackNames(is_hs2, desired_modpacks);
 			RepoConnectionInfo connection_info = DefaultConnectionInfo;
 			FullUserConfiguration userconfig = new()

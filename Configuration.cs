@@ -10,6 +10,33 @@ namespace BDSM;
 public record Configuration
 {
 	internal const string USER_CONFIG_FILENAME = "UserConfiguration.yaml";
+	public static readonly SimpleUserConfiguration.Modpacks DefaultModpacksSimpleHS2 = new()
+	{
+		Main = true,
+		MEShaders = true,
+		Exclusive = true,
+		UncensorSelector = true,
+		HS2Maps = true,
+		Studio = false,
+		StudioMaps = false,
+		BleedingEdge = false,
+		Userdata = true
+	};
+	public static readonly SimpleUserConfiguration.Modpacks DefaultModpacksSimpleAIS = DefaultModpacksSimpleHS2 with { HS2Maps = false };
+	public static readonly RawUserConfiguration.Modpacks DefaultModpacksRawHS2 = new()
+	{
+		Main = DefaultModpacksSimpleHS2.Main,
+		MEShaders = DefaultModpacksSimpleHS2.MEShaders,
+		Exclusive = DefaultModpacksSimpleHS2.Exclusive,
+		UncensorSelector = DefaultModpacksSimpleHS2.UncensorSelector,
+		HS2Maps = DefaultModpacksSimpleHS2.HS2Maps,
+		Studio = DefaultModpacksSimpleHS2.Studio,
+		StudioMaps = DefaultModpacksSimpleHS2.StudioMaps,
+		BleedingEdge = DefaultModpacksSimpleHS2.BleedingEdge,
+		Userdata = DefaultModpacksSimpleHS2.Userdata
+	};
+	public static readonly RawUserConfiguration.Modpacks DefaultModpacksRawAIS = DefaultModpacksRawHS2 with { HS2Maps = false };
+	public const bool DefaultPromptToContinue = true;
 	public readonly record struct OldUserConfiguration
 	{
 		public required string GamePath { get; init; }
@@ -24,7 +51,7 @@ public record Configuration
 		public required ImmutableHashSet<PathMapping> BasePathMappings { get; init; }
 		public required bool PromptToContinue { get; init; }
 	}
-	internal readonly record struct RawUserConfiguration
+	public readonly record struct RawUserConfiguration
 	{
 		public readonly record struct Modpacks
 		{
@@ -38,7 +65,7 @@ public record Configuration
 			public bool? BleedingEdge { get; init; }
 			public bool? Userdata { get; init; }
 		}
-		public string? GamePath { get; init; }
+		public required string GamePath { get; init; }
 		public Modpacks? OptionalModpacks { get; init; }
 		public bool? PromptToContinue { get; init; }
 	}
@@ -122,6 +149,7 @@ public record Configuration
 			{
 				FileNotFoundException => new UserConfigurationException("Configuration file is missing.", ex),
 				TypeInitializationException or YamlException => new UserConfigurationException("Configuration file is malformed.", ex),
+				NullReferenceException => new UserConfigurationException("Configuration file is empty.", ex),
 				_ => new UserConfigurationException("Unspecified error loading user configuration.", ex)
 			};
 		}
@@ -135,7 +163,7 @@ public record Configuration
 			throw new UserConfigurationException("GamePath is missing from the configuration file.");
 		bool is_hs2 = GamePathIsHS2(nullable_config.GamePath) ?? throw new UserConfigurationException($"{nullable_config.GamePath} is not a valid HS2 or AIS game directory.");
 		config_version = nullable_config.OptionalModpacks?.Main is null ? "0.3" : "0.3.2";
-		bool studio = nullable_config.OptionalModpacks?.Studio ?? false;
+		bool studio = nullable_config.OptionalModpacks?.Studio ?? DefaultModpacksSimpleHS2.Studio;
 		return new()
 		{
 			GamePath = nullable_config.GamePath,
@@ -144,10 +172,10 @@ public record Configuration
 				Studio = studio,
 				StudioMaps = nullable_config.OptionalModpacks?.StudioMaps ?? studio,
 				HS2Maps = nullable_config.OptionalModpacks?.HS2Maps ?? is_hs2,
-				BleedingEdge = nullable_config.OptionalModpacks?.BleedingEdge ?? false,
-				Userdata = nullable_config.OptionalModpacks?.Userdata ?? true
+				BleedingEdge = nullable_config.OptionalModpacks?.BleedingEdge ?? DefaultModpacksSimpleHS2.BleedingEdge,
+				Userdata = nullable_config.OptionalModpacks?.Userdata ?? DefaultModpacksSimpleHS2.Userdata
 			},
-			PromptToContinue = nullable_config.PromptToContinue ?? true
+			PromptToContinue = nullable_config.PromptToContinue ?? DefaultPromptToContinue
 		};
 	}
 	public static void SerializeUserConfiguration(SimpleUserConfiguration userconfig)

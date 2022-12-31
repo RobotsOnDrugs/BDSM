@@ -7,6 +7,9 @@ public static class ConfigurationTestData
 {
 	public const string ValidGamePath = @"D:\HoneySelect 2 DX";
 	public const string InvalidGamePath = @"A:\DoesntExist";
+
+	public static readonly RawUserConfiguration.Modpacks DefaultModpacksRaw = new();
+
 	public static readonly ImmutableHashSet<PathMapping> DefaultPathMappingsAIS = ModpackNamesToPathMappings(DefaultModpackNames(false), ValidGamePath, DefaultConnectionInfo.RootPath);
 	public static readonly ImmutableHashSet<PathMapping> DefaultPathMappingsHS2 = ModpackNamesToPathMappings(DefaultModpackNames(true), ValidGamePath, DefaultConnectionInfo.RootPath);
 
@@ -183,6 +186,16 @@ OptionalModpacks:
         BaseSideloaderDirectories = OldConfigModpackDefaults,
         PromptToContinue = true
     };
+
+#pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
+	// YamlDotNet is stupid and is happy to force GamePath to be set to null even though it's non-nullable, so test for it
+	public static readonly RawUserConfiguration RawUserConfigurationEmpty = new() { GamePath = null, OptionalModpacks = null, PromptToContinue = null };
+#pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
+	public static readonly RawUserConfiguration RawUserConfigurationGamePathOnly = new() { GamePath = ValidGamePath };
+	public static readonly RawUserConfiguration RawUserConfigurationBadGamePath = new() { GamePath = InvalidGamePath };
+	public static readonly RawUserConfiguration RawUserConfigurationDefault = new() { GamePath = ValidGamePath, OptionalModpacks = DefaultModpacksRawHS2, PromptToContinue = DefaultPromptToContinue };
+	public static readonly RawUserConfiguration RawUserConfigurationCustom = RawUserConfigurationDefault with { OptionalModpacks = DefaultModpacksRawHS2 with { MEShaders = false, Exclusive = false } };
+	public static readonly RawUserConfiguration RawUserConfiguration03Config = RawUserConfigurationDefault with { OptionalModpacks = DefaultModpacksRawHS2 with { Main = null, MEShaders = null, Exclusive = null, UncensorSelector = null, HS2Maps = null, StudioMaps = null } };
 
 	public static readonly FullUserConfiguration DefaultFullUserConfigurationHS2 = new()
 	{
