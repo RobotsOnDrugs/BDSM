@@ -127,8 +127,11 @@ public static partial class BDSM
 			_scanner.Connect();
 			foreach (PathMapping pathmap in GetPathMappingsFromSkipScanConfig(_skip_config, UserConfig))
 			{
-				FtpListItem _dl_file_info = _scanner.GetObjectInfo(pathmap.RemoteFullPath);
-				FilesToDownload.Add(PathMappingToFileDownload(pathmap with { FileSize = _dl_file_info.Size }));
+				FtpListItem? _dl_file_info = _scanner.GetObjectInfo(pathmap.RemoteFullPath);
+				if (_dl_file_info is not null)
+					FilesToDownload.Add(PathMappingToFileDownload(pathmap with { FileSize = _dl_file_info.Size }));
+				else
+					LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Couldn't get file info for {pathmap.RemoteFullPath}.[/]");
 			}
 			_scanner.Dispose();
 		}
