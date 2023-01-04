@@ -10,6 +10,31 @@ using static BDSM.BetterRepackRepositoryDefinitions;
 namespace BDSM;
 public static partial class BDSM
 {
+	internal const string HighlightColor = "orchid2";
+	internal const string FileListingColor = "turquoise2";
+	internal const string SuccessColor = "green";
+	internal const string WarningColor = "yellow3_1";
+	internal const string CancelColor = "gold3_1";
+	internal const string ErrorColor = "red1";
+	internal const string ErrorColorAlt = "red3";
+	internal const string DeleteColor = "orangered1";
+
+	internal readonly record struct DownloadCategories
+	{
+		internal required IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> QueuedDownloads { get; init; }
+		internal required IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> CanceledDownloads { get; init; }
+		internal required IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> CompletedDownloads { get; init; }
+		internal required IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> FailedDownloads { get; init; }
+		internal IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> UnfinishedDownloads => QueuedDownloads.Concat(CanceledDownloads);
+	}
+	internal class BDSMInternalFaultException : Exception
+	{
+		const string BugReportSuffix = " Please file a bug report and provide this information. https://github.com/RobotsOnDrugs/BDSM/issues\r\n";
+		internal BDSMInternalFaultException() { }
+		internal BDSMInternalFaultException(string? message) : base(message + BugReportSuffix) { }
+		internal BDSMInternalFaultException(string? message, bool include_bug_report_link) : base(message + (include_bug_report_link ? "" : BugReportSuffix)) { }
+		internal BDSMInternalFaultException(string? message, Exception? innerException) : base(message, innerException) { }
+	}
 #if DEBUG
 	private static void RaiseInternalFault(ILogger logger, string message) { logger.Debug(message); System.Diagnostics.Debugger.Break(); }
 #else
@@ -22,13 +47,12 @@ public static partial class BDSM
 #endif
 	private static List<Task> ProcessTasks(List<Task> tasks, CancellationTokenSource cts)
 	{
-		bool canceled = false;
-		bool all_faulted = true;
-		void CtrlCHandler(object sender, ConsoleCancelEventArgs args) { cts.Cancel(); canceled = true; args.Cancel = true; }
+		bool user_canceled = false;
+		void CtrlCHandler(object sender, ConsoleCancelEventArgs args) { cts.Cancel(false); user_canceled = true; args.Cancel = true; }
 		Console.CancelKeyPress += CtrlCHandler!;
 		List<Task> finished_tasks = new(tasks.Count);
 		List<AggregateException> exceptions = new();
-		while (tasks.Count != 0)
+		do
 		{
 			int completed_task_idx = Task.WaitAny(tasks.ToArray());
 			Task completed_task = tasks[completed_task_idx];
@@ -40,7 +64,8 @@ public static partial class BDSM
 					AggregateException taskex = completed_task.Exception!;
 					exceptions.Add(taskex);
 					if (taskex.InnerException is not FTPConnectionException)
-						cts.Cancel();
+						//if (taskex.InnerException is not FTPConnectionException or FTPTaskAbortedException)
+							cts.Cancel();
 					break;
 				default:
 					exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing task exceptions.")));
@@ -49,12 +74,9 @@ public static partial class BDSM
 			finished_tasks.Add(completed_task);
 			tasks.RemoveAt(completed_task_idx);
 		}
+		while (tasks.Count != 0);
 		Console.CancelKeyPress -= CtrlCHandler!;
-		if (canceled) throw new OperationCanceledException();
-		foreach (Task task in finished_tasks)
-			if (task.Status == TaskStatus.RanToCompletion)
-				all_faulted = false;
-		return all_faulted ? throw new AggregateException(exceptions) : finished_tasks;
+		return !user_canceled ? finished_tasks : throw new OperationCanceledException();
 	}
 	private static FullUserConfiguration GenerateNewUserConfig()
 	{

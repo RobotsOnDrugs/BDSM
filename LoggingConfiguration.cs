@@ -1,4 +1,4 @@
-﻿using NLog;
+using NLog;
 
 using Spectre.Console;
 
@@ -19,7 +19,7 @@ internal static class LoggingConfiguration
 			config = new();
 			NLog.Targets.FileTarget default_logfile_config = new("logfile")
 				{
-					Layout = NLog.Layouts.Layout.FromString("[${longdate}] ${level}: ${message}${exception:format=StackTrace,Data}"),
+					Layout = NLog.Layouts.Layout.FromString("[${longdate}]${when:when=exception != null: [${callsite-filename}${literal:text=\\:} ${callsite-linenumber}]} ${level}: ${message}${exception:format=StackTrace,Data}"),
 					FileName = "BDSM.log",
 					Footer = NLog.Layouts.Layout.FromString("== End BDSM log =="),
 					ArchiveOldFileOnStartupAboveSize = 1024 * 1024
@@ -29,9 +29,12 @@ internal static class LoggingConfiguration
 			return config;
 		}
 	}
-	internal static void LogMarkupText(ILogger logger, LogLevel log_level, string markup_text)
+	internal static void LogMarkupText(ILogger logger, LogLevel log_level, string markup_text, bool newline = true)
 	{
-		AnsiConsole.MarkupLine(markup_text);
+		if (newline)
+			AnsiConsole.MarkupLine(markup_text);
+		else
+			AnsiConsole.Markup(markup_text);
 		logger.Log(log_level, Markup.Remove(markup_text));
 	}
 	internal static void LogException(ILogger logger, Exception ex) => LogException(logger, LogLevel.Error, ex);

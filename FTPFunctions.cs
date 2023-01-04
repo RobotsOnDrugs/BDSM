@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using FluentFTP;
@@ -8,6 +8,7 @@ using static BDSM.Exceptions;
 namespace BDSM;
 public static class FTPFunctions
 {
+	public const int BufferSize = 65536;
 	private static readonly ConcurrentDictionary<int, bool> ScanQueueWaitStatus = new();
 	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo) =>
 		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
@@ -40,7 +41,7 @@ public static class FTPFunctions
 						retries++;
 						break;
 					default:
-						throw new BDSMInternalFaultException("Error handling a connection failure.", ex);
+						throw;
 				}
 			}
 		}
@@ -62,12 +63,14 @@ public static class FTPFunctions
 		if (!TryConnect(scanclient))
 			throw new FTPConnectionException();
 		ScanQueueWaitStatus[tid] = true;
-		void ErrorOut(Exception ex) { scanclient.Dispose(); throw ex; }
 		while (!ct.IsCancellationRequested)
 		{
 			ScanQueueWaitStatus[tid] = false;
 			if (accumulated_exceptions.Count > 2)
-				ErrorOut(new AggregateException(accumulated_exceptions));
+			{
+				scanclient.Dispose();
+				throw new AggregateException(accumulated_exceptions);
+			}
 			if (!retrying_scan)
 			{
 				if (!paths_to_scan.TryTake(out pathmap))
@@ -99,6 +102,7 @@ public static class FTPFunctions
 				if (scan_attempts == 3)
 				{
 					paths_to_scan.Add(pathmap);
+					scanclient.Dispose();
 					throw;
 				}
 				continue;
@@ -150,16 +154,25 @@ public static class FTPFunctions
 
 	public static void DownloadFileChunks(Configuration.RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, Action<ChunkDownloadProgressInformation, string> reportprogress, CancellationToken ct)
 	{
-		byte[] buffer = new byte[65536];
+		FTPTaskAbortedException SetupAbortException(string message, string filepath, Exception? inner_ex = null)
+		{
+			FTPTaskAbortedException task_abort_ex = inner_ex is not null ? new(message) : new(message, inner_ex);
+			task_abort_ex.Data["File"] = filepath;
+			return task_abort_ex;
+		}
+		byte[] buffer = new byte[BufferSize];
 		FileStream local_filestream = null!;
 		using FtpClient client = SetupFTPClient(repoinfo);
 		void Cleanup() { client.Dispose(); local_filestream.Dispose(); }
-		ChunkDownloadProgressInformation progressinfo;
-		while (!ct.IsCancellationRequested)
+		ChunkDownloadProgressInformation? progressinfo = null;
+		DownloadChunk chunk = default;
+		Stopwatch CurrentStopwatch = new();
+		bool canceled = ct.IsCancellationRequested;
+		while (!canceled && chunks.TryDequeue(out chunk))
 		{
 			if (!TryConnect(client))
 				throw new FTPConnectionException();
-			if (!chunks.TryDequeue(out DownloadChunk chunk))
+			if (!chunks.TryDequeue(out chunk))
 				break;
 			if (chunk.LocalPath != local_filestream?.Name)
 			{
@@ -167,7 +180,6 @@ public static class FTPFunctions
 				_ = Directory.CreateDirectory(Path.GetDirectoryName(chunk.LocalPath)!);
 				local_filestream = new(chunk.LocalPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
 			}
-			Stopwatch CurrentStopwatch = new();
 			Stream ftp_filestream;
 			int connection_retries = 0;
 			while (true)
@@ -178,16 +190,30 @@ public static class FTPFunctions
 					break;
 				}
 				catch (Exception) when (connection_retries <= 2) { connection_retries++; }
-				catch (Exception) { Cleanup(); throw; }
+				catch (Exception)
+				{
+					Cleanup();
+					reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
+					throw;
+				}
 			}
 			local_filestream.Lock(chunk.Offset, chunk.Length);
 			local_filestream.Position = chunk.Offset;
 			int total_chunk_bytes = 0;
 			int remaining_bytes = chunk.Length;
 			int bytes_to_process = 0;
-			while ((total_chunk_bytes < chunk.Length) && !ct.IsCancellationRequested)
+			Stopwatch write_time = new();
+			while (true)
 			{
-				CurrentStopwatch.Restart();
+				if (ct.IsCancellationRequested)
+				{
+					try { local_filestream.Unlock(chunk.Offset, chunk.Length); }
+					catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { Debugger.Break(); }
+					reportprogress(new ChunkDownloadProgressInformation() { BytesDownloaded = 0, TimeElapsed = CurrentStopwatch.Elapsed, TotalChunkSize = chunk.Length }, chunk.LocalPath);
+					break;
+				}
+				if (total_chunk_bytes > chunk.Length) { throw new BDSM.BDSMInternalFaultException("total chunk bytes is greater than the chunk length"); }
+				if (total_chunk_bytes == chunk.Length) break;
 				bytes_to_process = (buffer.Length < remaining_bytes) ? buffer.Length : remaining_bytes;
 				try
 				{
@@ -196,29 +222,43 @@ public static class FTPFunctions
 					total_chunk_bytes += bytes_to_process;
 					local_filestream.Write(buffer, 0, bytes_to_process);
 				}
-				catch (Exception)
+				catch (Exception ex)
 				{
+					ftp_filestream.Dispose();
 					local_filestream.Unlock(chunk.Offset, chunk.Length);
-					Cleanup();
-					CurrentStopwatch.Stop();
-					throw;
+					local_filestream.Dispose();
+					client.Disconnect();
+					client.Dispose();
+					string message = ex switch
+					{
+						OperationCanceledException => "The download operation was canceled.",
+						FTPConnectionException => "Could not connect to the server.",
+						FTPTaskAbortedException => "write timeout",
+						_ => $"Unexpected error: {ex.Message}"
+					};
+					reportprogress(new ChunkDownloadProgressInformation() { BytesDownloaded = 0, TimeElapsed = CurrentStopwatch.Elapsed, TotalChunkSize = chunk.Length }, chunk.LocalPath);
 				}
-				progressinfo = new ()
+				local_filestream.Unlock(chunk.Offset, chunk.Length);
+				progressinfo = new()
 				{
 					BytesDownloaded = bytes_to_process,
 					TimeElapsed = CurrentStopwatch.Elapsed,
 					TotalChunkSize = chunk.Length
 				};
 				local_filestream.Flush();
-				reportprogress(progressinfo, chunk.LocalPath);
+				reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 			}
-			local_filestream.Unlock(chunk.Offset, chunk.Length);
+			try { local_filestream.Unlock(chunk.Offset, chunk.Length); }
+			catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { Debugger.Break(); }
 			ftp_filestream.Dispose();
 			CurrentStopwatch.Stop();
+			reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 		}
 		local_filestream?.Flush();
 		local_filestream?.Dispose();
 		client.Disconnect();
 		client.Dispose();
+		if (chunk.FileName is not null)
+			reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 	}
 }

@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Diagnostics;
 
 using ShellProgressBar;
@@ -22,6 +22,15 @@ public readonly record struct DownloadChunk
 	public required long Offset { get; init; }
 	public required int Length { get; init; }
 	public string FileName => Path.GetFileName(LocalPath);
+}
+public enum DownloadStatus
+{
+	Success,
+	Queued,
+	InProgress,
+	Failure,
+	Canceled,
+	Undefined
 }
 
 public readonly record struct ChunkDownloadProgressInformation

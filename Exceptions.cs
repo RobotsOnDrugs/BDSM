@@ -1,4 +1,4 @@
-﻿namespace BDSM;
+namespace BDSM;
 public record Exceptions
 {
 	public class BDSMInternalFaultException : Exception
@@ -30,5 +30,6 @@ public record Exceptions
 		public FTPTaskAbortedException(string? message) : base(message) { }
 
 		public FTPTaskAbortedException(string? message, Exception? innerException) : base(message, innerException) { }
+		public override Dictionary<string, string> Data { get; } = new() { { "File", "" } };
 	}
 }
