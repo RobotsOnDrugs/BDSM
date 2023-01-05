@@ -1,6 +1,14 @@
-namespace BDSM;
+namespace BDSM.Lib;
 public record Exceptions
 {
+	public class BDSMInternalFaultException : Exception
+	{
+		const string BugReportSuffix = " Please file a bug report and provide this information. https://github.com/RobotsOnDrugs/BDSM/issues\r\n";
+		internal BDSMInternalFaultException() { }
+		internal BDSMInternalFaultException(string? message) : base(message + BugReportSuffix) { }
+		internal BDSMInternalFaultException(string? message, bool include_bug_report_link) : base(message + (include_bug_report_link ? "" : BugReportSuffix)) { }
+		internal BDSMInternalFaultException(string? message, Exception? innerException) : base(message, innerException) { }
+	}
 	public class FTPOperationException : Exception
 	{
 		public FTPOperationException() { }
