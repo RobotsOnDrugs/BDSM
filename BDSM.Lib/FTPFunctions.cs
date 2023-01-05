@@ -8,8 +8,13 @@ using static BDSM.Lib.Exceptions;
 namespace BDSM.Lib;
 public static class FTPFunctions
 {
-	public const int BufferSize = 65536;
+	private static readonly FTPFunctionOptions Options = new();
 	private static readonly ConcurrentDictionary<int, bool> ScanQueueWaitStatus = new();
+	public readonly record struct FTPFunctionOptions
+	{
+		public FTPFunctionOptions() { }
+		public int BufferSize { get; init; } = 65536;
+	}
 	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo) =>
 		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
 	public static FtpClient DefaultSideloaderClient() => SetupFTPClient(BetterRepackRepositoryDefinitions.DefaultConnectionInfo);
@@ -160,7 +165,7 @@ public static class FTPFunctions
 			task_abort_ex.Data["File"] = filepath;
 			return task_abort_ex;
 		}
-		byte[] buffer = new byte[BufferSize];
+		byte[] buffer = new byte[Options.BufferSize];
 		FileStream local_filestream = null!;
 		using FtpClient client = SetupFTPClient(repoinfo);
 		void Cleanup() { client.Dispose(); local_filestream.Dispose(); }

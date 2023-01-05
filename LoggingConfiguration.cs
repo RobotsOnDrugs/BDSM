@@ -5,7 +5,7 @@ using Spectre.Console;
 namespace BDSM;
 internal static class LoggingConfiguration
 {
-	internal static NLog.Config.LoggingConfiguration LoadCustomConfiguration(out bool is_custom)
+	public static NLog.Config.LoggingConfiguration LoadCustomConfiguration(out bool is_custom)
 	{
 		NLog.Config.LoggingConfiguration config;
 		try

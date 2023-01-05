@@ -3,22 +3,21 @@
 using NLog;
 using Spectre.Console;
 
-using static BDSM.Configuration;
-using static BDSM.Exceptions;
-using static BDSM.BetterRepackRepositoryDefinitions;
+using static BDSM.Lib.Configuration;
+using static BDSM.Lib.Exceptions;
+using static BDSM.Lib.BetterRepackRepositoryDefinitions;
 
 namespace BDSM;
 public static partial class BDSM
 {
-	internal const string HighlightColor = "orchid2";
-	internal const string FileListingColor = "turquoise2";
-	internal const string SuccessColor = "green";
-	internal const string WarningColor = "yellow3_1";
-	internal const string CancelColor = "gold3_1";
-	internal const string ErrorColor = "red1";
-	internal const string ErrorColorAlt = "red3";
-	internal const string DeleteColor = "orangered1";
-
+	public const string HighlightColor = "orchid2";
+	public const string FileListingColor = "turquoise2";
+	public const string SuccessColor = "green";
+	public const string WarningColor = "yellow3_1";
+	public const string CancelColor = "gold3_1";
+	public const string ErrorColor = "red1";
+	public const string ErrorColorAlt = "red3";
+	public const string DeleteColor = "orangered1";
 	internal readonly record struct DownloadCategories
 	{
 		internal required IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> QueuedDownloads { get; init; }

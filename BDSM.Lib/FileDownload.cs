@@ -36,31 +36,31 @@ public enum DownloadStatus
 public readonly record struct ChunkDownloadProgressInformation
 {
 	public required long BytesDownloaded { get; init; }
-	public string BytesTransferredString => UtilityFunctions.FormatBytes(BytesDownloaded);
+	public string BytesTransferredString => Utility.FormatBytes(BytesDownloaded);
 	public required TimeSpan TimeElapsed { get; init; }
 	public required long TotalChunkSize { get; init; }
 	public double CurrentSpeed => BytesDownloaded / TimeElapsed.TotalSeconds;
-	public string CurrentSpeedString => UtilityFunctions.FormatBytes(Math.Round(CurrentSpeed, 2)) + "/s";
+	public string CurrentSpeedString => Utility.FormatBytes(Math.Round(CurrentSpeed, 2)) + "/s";
 }
 public record FileDownloadProgressInformation
 {
 	public required string FilePath { get; init; }
 	public long TotalBytesDownloaded { get; set; } = 0;
-	public string TotalBytesDownloadedString => UtilityFunctions.FormatBytes(TotalBytesDownloaded);
+	public string TotalBytesDownloadedString => Utility.FormatBytes(TotalBytesDownloaded);
 	private Stopwatch TotalTimeStopwatch { get; set; } = new();
 	public TimeSpan TotalTimeElapsed => TotalTimeStopwatch.Elapsed;
 	public long CurrentBytesDownloaded { get; set; } = 0;
 	public TimeSpan CurrentTimeElapsed { get; set; } = new TimeSpan();
 	public double CurrentSpeed { get; private set; }
-	public string CurrentSpeedString => UtilityFunctions.FormatBytes(CurrentSpeed) + "/s";
+	public string CurrentSpeedString => Utility.FormatBytes(CurrentSpeed) + "/s";
 	public Stopwatch ProgressUpdateStopwatch { get; private set; } = new();
 	public TimeSpan ETA => new(0, 0, 0, 0, (int)Math.Round(TotalFileSize / AverageSpeed * 1000, 0));
 	public long PreviousBytesDownloaded { get; private set; } = 0;
 	public required long TotalFileSize { get; init; }
-	public string TotalFileSizeString => UtilityFunctions.FormatBytes(TotalFileSize);
+	public string TotalFileSizeString => Utility.FormatBytes(TotalFileSize);
 	public ChildProgressBar FileProgressBar { get; private set; } = null!;
 	public double AverageSpeed => TotalTimeElapsed.TotalSeconds != 0 ? TotalBytesDownloaded / TotalTimeElapsed.TotalSeconds : 0;
-	public string AverageSpeedString => UtilityFunctions.FormatBytes(Math.Round(AverageSpeed, 2)) + "/s";
+	public string AverageSpeedString => Utility.FormatBytes(Math.Round(AverageSpeed, 2)) + "/s";
 	public bool IsInitialized { get; private set; } = false;
 	public bool IsComplete { get; private set; } = false;
 	public bool CompletedSuccessfully { get; private set; } = false;

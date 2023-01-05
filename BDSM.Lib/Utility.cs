@@ -5,7 +5,7 @@ using static BDSM.Lib.Configuration;
 
 namespace BDSM.Lib;
 
-public static class UtilityFunctions
+public static class Utility
 {
 	public static ConcurrentBag<PathMapping> GetPathMappingsFromSkipScanConfig(SkipScanConfiguration config, FullUserConfiguration userconfig)
 	{

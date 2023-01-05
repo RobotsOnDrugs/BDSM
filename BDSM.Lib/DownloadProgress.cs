@@ -4,7 +4,7 @@ using System.Diagnostics;
 using ShellProgressBar;
 
 namespace BDSM.Lib;
-internal static class DownloadProgress
+public static class DownloadProgress
 {
 	public const int UPDATE_INTERVAL_MILLISECONDS = 100;
 	public static ProgressBar TotalProgressBar = null!;
@@ -27,16 +27,16 @@ internal static class DownloadProgress
 	internal static int NumberOfFilesToDownload = 0;
 	internal static int TotalNumberOfFilesToDownload = 0;
 	internal static long TotalBytesToDownload = 0;
-	internal static string TotalBytesToDownloadString => UtilityFunctions.FormatBytes(TotalBytesToDownload);
+	internal static string TotalBytesToDownloadString => Utility.FormatBytes(TotalBytesToDownload);
 	internal static long TotalBytesDownloaded = 0;
-	internal static string TotalBytesDownloadedString => UtilityFunctions.FormatBytes(TotalBytesDownloaded);
+	internal static string TotalBytesDownloadedString => Utility.FormatBytes(TotalBytesDownloaded);
 	internal static double TotalCurrentSpeed = 0;
-	internal static string TotalCurrentSpeedString => UtilityFunctions.FormatBytes(TotalCurrentSpeed) + "/s";
+	internal static string TotalCurrentSpeedString => Utility.FormatBytes(TotalCurrentSpeed) + "/s";
 	internal static readonly ConcurrentDictionary<string, FileDownloadProgressInformation> FileDownloadsInformation = new();
 	internal static readonly Stopwatch DownloadSpeedStopwatch = new();
 	internal static readonly Stopwatch ProgressUpdateStopwatch = Stopwatch.StartNew();
 	internal static double TotalDownloadSpeed => DownloadSpeedStopwatch.Elapsed.TotalSeconds != 0 ? TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds : 0;
-	internal static string TotalDownloadSpeedString => UtilityFunctions.FormatBytes(TotalDownloadSpeed) + "/s";
+	internal static string TotalDownloadSpeedString => Utility.FormatBytes(TotalDownloadSpeed) + "/s";
 	public static TimeSpan ETA => new(0, 0, 0, 0, (int)Math.Round(TotalBytesToDownload / TotalDownloadSpeed * 1000, 0));
 	private static bool TrackingTotalCurrentSpeed = false;
 
@@ -98,7 +98,7 @@ internal static class DownloadProgress
 				string total_progress_message = $"Downloading files ({downloads_finished} done / {downloads_in_progress} in progress / {downloads_in_queue} remaining): " +
 					$"{TotalBytesDownloadedString} / {TotalBytesToDownloadString} " +
 					$"(Current speed: {TotalCurrentSpeedString}) " +
-					$"(Average speed: {UtilityFunctions.FormatBytes(TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
+					$"(Average speed: {Utility.FormatBytes(TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
 				TotalProgressBar.Tick((int)(TotalBytesDownloaded / 1024), ETA, total_progress_message);
 				ProgressUpdateStopwatch.Restart();
 			}
