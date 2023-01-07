@@ -1,4 +1,4 @@
-using static BDSM.Configuration;
+using static BDSM.Lib.Configuration;
 using static BDSM.Tests.ConfigurationTestData;
 
 namespace BDSM.Tests;

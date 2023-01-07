@@ -177,8 +177,6 @@ public static class FTPFunctions
 		{
 			if (!TryConnect(client))
 				throw new FTPConnectionException();
-			if (!chunks.TryDequeue(out chunk))
-				break;
 			if (chunk.LocalPath != local_filestream?.Name)
 			{
 				local_filestream?.Dispose();
@@ -243,13 +241,17 @@ public static class FTPFunctions
 					};
 					reportprogress(new ChunkDownloadProgressInformation() { BytesDownloaded = 0, TimeElapsed = CurrentStopwatch.Elapsed, TotalChunkSize = chunk.Length }, chunk.LocalPath);
 				}
-				local_filestream.Unlock(chunk.Offset, chunk.Length);
 				progressinfo = new()
 				{
 					BytesDownloaded = bytes_to_process,
 					TimeElapsed = CurrentStopwatch.Elapsed,
 					TotalChunkSize = chunk.Length
 				};
+				if (ct.IsCancellationRequested)
+				{
+					try { local_filestream.Unlock(chunk.Offset, chunk.Length); }
+					catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { Debugger.Break(); }
+				}
 				local_filestream.Flush();
 				reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 			}
@@ -259,6 +261,8 @@ public static class FTPFunctions
 			CurrentStopwatch.Stop();
 			reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 		}
+		try { local_filestream?.Unlock(chunk.Offset, chunk.Length); }
+		catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { }
 		local_filestream?.Flush();
 		local_filestream?.Dispose();
 		client.Disconnect();

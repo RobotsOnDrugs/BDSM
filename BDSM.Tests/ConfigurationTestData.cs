@@ -1,6 +1,8 @@
-﻿using static BDSM.Configuration;
-using static BDSM.BetterRepackRepositoryDefinitions;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
+
+using static BDSM.Lib.Configuration;
+using static BDSM.Lib.BetterRepackRepositoryDefinitions;
+using BDSM.Lib;
 
 namespace BDSM.Tests;
 public static class ConfigurationTestData

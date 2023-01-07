@@ -13,7 +13,7 @@ using YamlDotNet.Core;
 using Spectre.Console;
 
 using static BDSM.Lib.FTPFunctions;
-using static BDSM.Lib.DownloadProgress;
+using static BDSM.DownloadProgress;
 using static BDSM.LoggingConfiguration;
 using static BDSM.Lib.Configuration;
 using static BDSM.Lib.Utility;
@@ -132,7 +132,7 @@ public static partial class BDSM
 				if (_dl_file_info is not null)
 					FilesToDownload.Add(PathMappingToFileDownload(pathmap with { FileSize = _dl_file_info.Size }));
 				else
-					LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Couldn't get file info for {pathmap.RemoteFullPath}.[/]");
+					LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Couldn't get file info for {pathmap.RemoteFullPath.EscapeMarkup()}.[/]");
 			}
 			_scanner.Dispose();
 		}
@@ -294,11 +294,15 @@ public static partial class BDSM
 
 		if (!FilesToDownload.IsEmpty)
 		{
-			TotalNumberOfFilesToDownload = FilesToDownload.Count;
-			NumberOfFilesToDownload = FilesToDownload.Count;
-			foreach (Lib.FileDownload file_download in FilesToDownload)
-				TotalBytesToDownload += file_download.TotalFileSize;
-			LogMarkupText(logger, LogLevel.Info, $"[{HighlightColor}]{Pluralize(NumberOfFilesToDownload, " file")}[/] ([{HighlightColor}]{FormatBytes(TotalBytesToDownload)}[/]) to download.");
+			TotalDownloadStatus DLStatus = new()
+			{
+				TotalNumberOfFilesToDownload = FilesToDownload.Count,
+				NumberOfFilesToDownload = FilesToDownload.Count,
+				TotalBytesToDownload = FilesToDownload.Select(file_dl => file_dl.TotalFileSize).Sum()
+			};
+			DLStatus.TotalNumberOfFilesToDownload = FilesToDownload.Count;
+			DLStatus.NumberOfFilesToDownload = FilesToDownload.Count;
+			LogMarkupText(logger, LogLevel.Info, $"[{HighlightColor}]{Pluralize(DLStatus.NumberOfFilesToDownload, " file")}[/] ([{HighlightColor}]{FormatBytes(DLStatus.TotalBytesToDownload)}[/]) to download.");
 
 			bool display_summary_before = UserConfig.PromptToContinue && AnsiConsole.Confirm("Show summary?", true);
 			if (display_summary_before)
@@ -311,12 +315,12 @@ public static partial class BDSM
 
 			OpTimer.Restart();
 			HashSet<FileDownloadProgressInformation> failed_files = new();
-			TrackTotalCurrentSpeed();
-			TotalProgressBar = new((int)(TotalBytesToDownload / 1024), "Downloading files:", DefaultTotalProgressBarOptions);
+			DLStatus.TrackTotalCurrentSpeed();
+			TotalProgressBar = new((int)(DLStatus.TotalBytesToDownload / 1024), "Downloading files:", DefaultTotalProgressBarOptions);
 			ConcurrentQueue<Lib.DownloadChunk> chunks = new();
 			while (FilesToDownload.TryTake(out Lib.FileDownload current_file_download))
 			{
-				FileDownloadsInformation[current_file_download.LocalPath] = new FileDownloadProgressInformation()
+				DLStatus.FileDownloadsInformation[current_file_download.LocalPath] = new FileDownloadProgressInformation()
 				{
 					FilePath = current_file_download.LocalPath,
 					TotalFileSize = current_file_download.TotalFileSize
@@ -332,14 +336,14 @@ public static partial class BDSM
 			bool download_canceled = false;
 			AggregateException? download_failures = null;
 
-			DownloadSpeedStopwatch.Start();
+			DLStatus.DownloadSpeedStopwatch.Start();
 			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-				download_tasks.Add(Task.Run(() => DownloadFileChunks(UserConfig.ConnectionInfo, in chunks, ReportProgress, download_ct), download_ct));
-			try { ProcessTasks(download_tasks, download_cts); }
+				download_tasks.Add(Task.Run(() => DownloadFileChunks(UserConfig.ConnectionInfo, in chunks, DLStatus.ReportProgress, download_ct), download_ct));
+			try { finished_download_tasks = ProcessTasks(download_tasks, download_cts); }
 			catch (OperationCanceledException) { download_canceled = true; }
 			catch (AggregateException ex) { download_failures = ex; }
-			DownloadSpeedStopwatch.Stop();
-			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in FileDownloadsInformation)
+			DLStatus.DownloadSpeedStopwatch.Stop();
+			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in DLStatus.FileDownloadsInformation)
 			{
 				FileDownloadProgressInformation progress_info = progress_info_kvp.Value;
 				if (progress_info.IsInitialized && !progress_info.IsComplete)
@@ -362,23 +366,23 @@ public static partial class BDSM
 				foreach (Exception inner_ex in download_failures.Flatten().InnerExceptions)
 					logger.Error(inner_ex);
 			}
-			int number_of_downloads_finished = TotalNumberOfFilesToDownload - NumberOfFilesToDownload;
-			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> queued_downloads = FileDownloadsInformation.Where(info => !info.Value.IsInitialized);
-			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> canceled_downloads = FileDownloadsInformation.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
-			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> completed_downloads = FileDownloadsInformation.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded == info.Value.TotalFileSize));
+			int number_of_downloads_finished = DLStatus.TotalNumberOfFilesToDownload - DLStatus.NumberOfFilesToDownload;
+			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> queued_downloads = DLStatus.FileDownloadsInformation.Where(info => !info.Value.IsInitialized);
+			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> canceled_downloads = DLStatus.FileDownloadsInformation.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
+			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> completed_downloads = DLStatus.FileDownloadsInformation.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded == info.Value.TotalFileSize));
 			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> unfinished_downloads = queued_downloads.Concat(canceled_downloads);
-			long bytes_of_completed_files = FileDownloadsInformation
+			long bytes_of_completed_files = DLStatus.FileDownloadsInformation
 				.Where(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded == info.Value.TotalFileSize))
 				.Sum(info => info.Value.TotalBytesDownloaded);
 			if (download_canceled)
 			{
 				LogMarkupText(logger, LogLevel.Warn, $"Canceled download of [gold3_1]{Pluralize(unfinished_downloads.Count(), " file")}[/]" +
-					$" ([orchid2]{FormatBytes(TotalBytesDownloaded - bytes_of_completed_files)}[/] wasted).");
+					$" ([orchid2]{FormatBytes(DLStatus.TotalBytesDownloaded - bytes_of_completed_files)}[/] wasted).");
 			}
 			LogMarkupText(logger, LogLevel.Info, $"Completed download of [orchid2]{Pluralize(number_of_downloads_finished, " file")}[/] ([orchid2]{FormatBytes(bytes_of_completed_files)}[/])" +
 				$" in [orchid2]{(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}" +
 				$"{Pluralize(OpTimer.Elapsed.Seconds, " second")}[/].");
-			LogMarkupText(logger, LogLevel.Info, $"Average speed: [orchid2]{FormatBytes(TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s[/]");
+			LogMarkupText(logger, LogLevel.Info, $"Average speed: [orchid2]{FormatBytes(DLStatus.TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s[/]");
 
 			bool display_summary = UserConfig.PromptToContinue && AnsiConsole.Confirm("Display file download summary?");
 			void LogSummary(string message)
