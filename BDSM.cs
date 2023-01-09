@@ -17,6 +17,7 @@ using static BDSM.DownloadProgress;
 using static BDSM.LoggingConfiguration;
 using static BDSM.Lib.Configuration;
 using static BDSM.Lib.Utility;
+using BDSM.Lib;
 
 namespace BDSM;
 
@@ -31,15 +32,16 @@ public static partial class BDSM
 
 	public static async Task<int> Main()
 	{
+		_ = SetConsoleOutputCP(65001);
+		_ = SetConsoleCP(65001);
 		ILogger logger = LogManager.GetCurrentClassLogger();
 		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger);
+		InitalizeLibraryLoggers(logger);
+
 		FTPFunctionOptions FTPOptions = new() { BufferSize = 65536 };
 
 		if (is_custom_logger)
 			LogMarkupText(logger, LogLevel.Info, $"Custom logging configuration loaded [{SuccessColor}]successfully[/].");
-
-		_ = SetConsoleOutputCP(65001);
-		_ = SetConsoleCP(65001);
 
 		FullUserConfiguration UserConfig;
 		const string CurrentConfigVersion = "0.3.2";
@@ -108,17 +110,17 @@ public static partial class BDSM
 			default:
 				throw new BDSMInternalFaultException("Detection of user configuration version failed.");
 		}
-		ImmutableHashSet<Lib.PathMapping> BaseDirectoriesToScan;
-		ConcurrentBag<Lib.PathMapping> DirectoriesToScan = new();
-		ConcurrentDictionary<string, Lib.PathMapping> FilesOnServer = new();
-		ConcurrentBag<Lib.FileDownload> FilesToDownload = new();
+		ImmutableHashSet<PathMapping> BaseDirectoriesToScan;
+		ConcurrentBag<PathMapping> DirectoriesToScan = new();
+		ConcurrentDictionary<string, PathMapping> FilesOnServer = new();
+		ConcurrentBag<FileDownload> FilesToDownload = new();
 		ConcurrentBag<FileInfo> FilesToDelete = new();
 
 		const string SKIP_SCAN_CONFIG_FILENAME = "SkipScan.yaml";
 		bool SkipScan = false;
 #if DEBUG
-		Lib.SkipScanConfiguration _skip_config = File.Exists(SKIP_SCAN_CONFIG_FILENAME)
-			? new Deserializer().Deserialize<Lib.SkipScanConfiguration>(ReadConfigAndDispose(SKIP_SCAN_CONFIG_FILENAME))
+		SkipScanConfiguration _skip_config = File.Exists(SKIP_SCAN_CONFIG_FILENAME)
+			? new Deserializer().Deserialize<SkipScanConfiguration>(ReadConfigAndDispose(SKIP_SCAN_CONFIG_FILENAME))
 			: new() { SkipScan = false, FileMappings = Array.Empty<string>() };
 		SkipScan = _skip_config.SkipScan;
 
@@ -126,7 +128,7 @@ public static partial class BDSM
 		{
 			using FtpClient _scanner = SetupFTPClient(UserConfig.ConnectionInfo);
 			_scanner.Connect();
-			foreach (Lib.PathMapping pathmap in GetPathMappingsFromSkipScanConfig(_skip_config, UserConfig))
+			foreach (PathMapping pathmap in GetPathMappingsFromSkipScanConfig(_skip_config, UserConfig))
 			{
 				FtpListItem? _dl_file_info = _scanner.GetObjectInfo(pathmap.RemoteFullPath);
 				if (_dl_file_info is not null)
@@ -138,7 +140,7 @@ public static partial class BDSM
 		}
 #endif
 		if (SkipScan)
-			BaseDirectoriesToScan = ImmutableHashSet<Lib.PathMapping>.Empty;
+			BaseDirectoriesToScan = ImmutableHashSet<PathMapping>.Empty;
 		else
 		{
 			try { BaseDirectoriesToScan = UserConfig.BasePathMappings; }
@@ -148,7 +150,7 @@ public static partial class BDSM
 				PromptBeforeExit();
 				return 1;
 			}
-			foreach (Lib.PathMapping mapping in BaseDirectoriesToScan)
+			foreach (PathMapping mapping in BaseDirectoriesToScan)
 				DirectoriesToScan.Add(mapping);
 		}
 
@@ -223,7 +225,7 @@ public static partial class BDSM
 		OpTimer.Restart();
 		bool local_access_successful = true;
 		ConcurrentQueue<Exception> local_access_exceptions = new();
-		foreach (Lib.PathMapping pm in BaseDirectoriesToScan)
+		foreach (PathMapping pm in BaseDirectoriesToScan)
 		{
 			DirectoryInfo base_dir_di = new(pm.LocalFullPath);
 			Directory.CreateDirectory(pm.LocalFullPath);
@@ -238,7 +240,7 @@ public static partial class BDSM
 					filepath_idx = is_disabled_zipmod ?
 						Path.ChangeExtension(fileondiskinfo.FullName, ".zipmod").ToLower() :
 						filepath_idx = fileondiskinfo.FullName.ToLower();
-				if (FilesOnServer.TryGetValue(filepath_idx, out Lib.PathMapping match_pm) && (is_disabled_zipmod || match_pm.FileSize == fileondiskinfo.Length))
+				if (FilesOnServer.TryGetValue(filepath_idx, out PathMapping match_pm) && (is_disabled_zipmod || match_pm.FileSize == fileondiskinfo.Length))
 					_ = FilesOnServer.TryRemove(match_pm.LocalFullPathLower, out _);
 				else if (pm.DeleteClientFiles)
 					FilesToDelete.Add(fileondiskinfo);
@@ -254,7 +256,7 @@ public static partial class BDSM
 			if (!local_access_successful)
 				throw new AggregateException(local_access_exceptions);
 		}
-		foreach (KeyValuePair<string, Lib.PathMapping> pm_kvp in FilesOnServer)
+		foreach (KeyValuePair<string, PathMapping> pm_kvp in FilesOnServer)
 			FilesToDownload.Add(PathMappingToFileDownload(pm_kvp.Value));
 		OpTimer.Stop();
 		LogMarkupText(logger, LogLevel.Info,$"Comparison took [{HighlightColor}]{OpTimer.ElapsedMilliseconds}ms[/].");
@@ -308,7 +310,7 @@ public static partial class BDSM
 			if (display_summary_before)
 			{
 				AnsiConsole.WriteLine("Files to download:");
-				foreach (Lib.FileDownload file_dl in FilesToDownload.OrderBy(fd => fd.LocalPath))
+				foreach (FileDownload file_dl in FilesToDownload.OrderBy(fd => fd.LocalPath))
 					AnsiConsole.MarkupLine($"[deepskyblue1]{Path.GetRelativePath(UserConfig.GamePath, file_dl.LocalPath).EscapeMarkup()}[/] ([{HighlightColor}]{FormatBytes(file_dl.TotalFileSize)}[/])");
 				PromptUserToContinue();
 			}
@@ -317,15 +319,15 @@ public static partial class BDSM
 			HashSet<FileDownloadProgressInformation> failed_files = new();
 			DLStatus.TrackTotalCurrentSpeed();
 			TotalProgressBar = new((int)(DLStatus.TotalBytesToDownload / 1024), "Downloading files:", DefaultTotalProgressBarOptions);
-			ConcurrentQueue<Lib.DownloadChunk> chunks = new();
-			while (FilesToDownload.TryTake(out Lib.FileDownload current_file_download))
+			ConcurrentQueue<DownloadChunk> chunks = new();
+			while (FilesToDownload.TryTake(out FileDownload current_file_download))
 			{
 				DLStatus.FileDownloadsInformation[current_file_download.LocalPath] = new FileDownloadProgressInformation()
 				{
 					FilePath = current_file_download.LocalPath,
 					TotalFileSize = current_file_download.TotalFileSize
 				};
-				foreach (Lib.DownloadChunk chunk in current_file_download.DownloadChunks)
+				foreach (DownloadChunk chunk in current_file_download.DownloadChunks)
 					chunks.Enqueue(chunk);
 			}
 			int download_task_count = (UserConfig.ConnectionInfo.MaxConnections < chunks.Count) ? UserConfig.ConnectionInfo.MaxConnections : chunks.Count;

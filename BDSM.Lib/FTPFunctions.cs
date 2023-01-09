@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+
+using NLog;
 using FluentFTP;
 
 using static BDSM.Lib.Exceptions;
@@ -15,6 +17,12 @@ public static class FTPFunctions
 		public FTPFunctionOptions() { }
 		public int BufferSize { get; init; } = 65536;
 	}
+	private const string prefix = "FTPFunctions";
+	private static readonly ILogger null_logger = LogManager.CreateNullLogger();
+	internal static ILogger parent_logger = null_logger;
+	private static ConsolidatedLogger logger = new(null, prefix);
+	public static void SetLogger(ILogger parent) { parent_logger = (parent_logger == null_logger) ? parent : throw new InvalidOperationException(); logger = new(parent_logger, prefix); parent_logger.Info($"[{prefix}] Logger initialized."); }
+
 	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo) =>
 		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
 	public static FtpClient DefaultSideloaderClient() => SetupFTPClient(BetterRepackRepositoryDefinitions.DefaultConnectionInfo);
@@ -24,6 +32,7 @@ public static class FTPFunctions
 		int retries = 0;
 		while (retries <= max_retries)
 		{
+			logger.Debug($"TryConnect hit with {retries} retries.");
 			try
 			{
 				client.Connect();
@@ -41,7 +50,8 @@ public static class FTPFunctions
 					case FtpResponseType.PermanentNegativeCompletion:
 						throw;
 					case FtpResponseType.PositivePreliminary or FtpResponseType.PositiveCompletion or FtpResponseType.PositiveIntermediate:
-						// log this
+						logger.Error("FtpCommandException was thrown with a positive response.");
+						logger.Log(LogLevel.Error, ex, prefix);
 						Debugger.Break();
 						retries++;
 						break;
@@ -67,6 +77,7 @@ public static class FTPFunctions
 		using FtpClient scanclient = SetupFTPClient(repoinfo);
 		if (!TryConnect(scanclient))
 			throw new FTPConnectionException();
+
 		ScanQueueWaitStatus[tid] = true;
 		while (!ct.IsCancellationRequested)
 		{

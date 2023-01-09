@@ -1,3 +1,5 @@
+using BDSM.Lib;
+
 using NLog;
 
 using Spectre.Console;
@@ -5,7 +7,12 @@ using Spectre.Console;
 namespace BDSM;
 internal static class LoggingConfiguration
 {
-	public static NLog.Config.LoggingConfiguration LoadCustomConfiguration(out bool is_custom)
+	internal static void InitalizeLibraryLoggers(ILogger logger)
+	{
+		FTPFunctions.SetLogger(logger);
+		//Configuration.SetLogger(logger);
+	}
+	internal static NLog.Config.LoggingConfiguration LoadCustomConfiguration(out bool is_custom)
 	{
 		NLog.Config.LoggingConfiguration config;
 		try
