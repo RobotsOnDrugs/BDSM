@@ -40,7 +40,7 @@ public static partial class BDSM
 			Console.WriteLine("");
 			LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Update aborted, shutting down.[/]");
 			LogManager.Shutdown();
-			args.Cancel = false; PromptBeforeExit(); Environment.Exit(1);
+			args.Cancel = false; Environment.Exit(1);
 		}
 		Console.CancelKeyPress += CtrlCHandler!;
 		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger);
@@ -170,6 +170,7 @@ public static partial class BDSM
 		List<Task> finished_scan_tasks = new();
 		using CancellationTokenSource scan_cts = new();
 		CancellationToken scan_ct = scan_cts.Token;
+		Console.CancelKeyPress -= CtrlCHandler!;
 		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
 			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, ref FilesOnServer, UserConfig.ConnectionInfo, scan_ct), scan_ct));
 		bool all_faulted = true;
@@ -218,6 +219,7 @@ public static partial class BDSM
 			return 1;
 		}
 		Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
+		Console.CancelKeyPress += CtrlCHandler!;
 
 		if (none_successful || (FilesOnServer.IsEmpty && !DirectoriesToScan.IsEmpty))
 		{
@@ -345,6 +347,7 @@ public static partial class BDSM
 			CancellationToken download_ct = download_cts.Token;
 			bool download_canceled = false;
 			AggregateException? download_failures = null;
+			Console.CancelKeyPress -= CtrlCHandler!;
 
 			DLStatus.DownloadSpeedStopwatch.Start();
 			for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
@@ -353,6 +356,7 @@ public static partial class BDSM
 			catch (OperationCanceledException) { download_canceled = true; }
 			catch (AggregateException ex) { download_failures = ex; }
 			DLStatus.DownloadSpeedStopwatch.Stop();
+			Console.CancelKeyPress += CtrlCHandler!;
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in DLStatus.FileDownloadsInformation)
 			{
 				FileDownloadProgressInformation progress_info = progress_info_kvp.Value;
