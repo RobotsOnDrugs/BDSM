@@ -47,7 +47,7 @@ public static partial class BDSM
 	private static List<Task> ProcessTasks(List<Task> tasks, CancellationTokenSource cts)
 	{
 		bool user_canceled = false;
-		void CtrlCHandler(object sender, ConsoleCancelEventArgs args) { cts.Cancel(false); user_canceled = true; args.Cancel = true; }
+		void CtrlCHandler(object sender, ConsoleCancelEventArgs args) { cts.Cancel(false); user_canceled = true; args.Cancel = true; LogManager.Shutdown(); }
 		Console.CancelKeyPress += CtrlCHandler!;
 		List<Task> finished_tasks = new(tasks.Count);
 		List<AggregateException> exceptions = new();

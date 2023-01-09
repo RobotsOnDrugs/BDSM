@@ -12,6 +12,13 @@ internal static class LoggingConfiguration
 		FTPFunctions.SetLogger(logger);
 		//Configuration.SetLogger(logger);
 	}
+	internal static readonly NLog.Targets.FileTarget default_logfile_config = new("logfile")
+	{
+		Layout = NLog.Layouts.Layout.FromString("[${longdate}]${when:when=exception != null: [${callsite-filename}${literal:text=\\:} ${callsite-linenumber}]} ${level}: ${message}${exception:format=StackTrace,Data}"),
+		FileName = "BDSM.log",
+		Footer = NLog.Layouts.Layout.FromString("[${longdate}] ${level}: == End BDSM log =="),
+		ArchiveOldFileOnStartupAboveSize = 1024 * 1024
+	};
 	internal static NLog.Config.LoggingConfiguration LoadCustomConfiguration(out bool is_custom)
 	{
 		NLog.Config.LoggingConfiguration config;
@@ -24,13 +31,6 @@ internal static class LoggingConfiguration
 		catch (Exception ex) when (ex is NLogConfigurationException or FileNotFoundException)
 		{
 			config = new();
-			NLog.Targets.FileTarget default_logfile_config = new("logfile")
-				{
-					Layout = NLog.Layouts.Layout.FromString("[${longdate}]${when:when=exception != null: [${callsite-filename}${literal:text=\\:} ${callsite-linenumber}]} ${level}: ${message}${exception:format=StackTrace,Data}"),
-					FileName = "BDSM.log",
-					Footer = NLog.Layouts.Layout.FromString("== End BDSM log =="),
-					ArchiveOldFileOnStartupAboveSize = 1024 * 1024
-				};
 			config.AddRule(LogLevel.Info, LogLevel.Fatal, default_logfile_config);
 			is_custom = false;
 			return config;

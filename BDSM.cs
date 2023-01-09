@@ -35,13 +35,21 @@ public static partial class BDSM
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
 		ILogger logger = LogManager.GetCurrentClassLogger();
+		void CtrlCHandler(object sender, ConsoleCancelEventArgs args)
+		{
+			Console.WriteLine("");
+			LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Update aborted, shutting down.[/]");
+			LogManager.Shutdown();
+			args.Cancel = false; PromptBeforeExit(); Environment.Exit(1);
+		}
+		Console.CancelKeyPress += CtrlCHandler!;
 		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger);
+		if (is_custom_logger)
+			LogMarkupText(logger, LogLevel.Info, $"Custom logging configuration loaded [{SuccessColor}]successfully[/].");
+		logger.Info("== Begin BDSM log ==");
 		InitalizeLibraryLoggers(logger);
 
 		FTPFunctionOptions FTPOptions = new() { BufferSize = 65536 };
-
-		if (is_custom_logger)
-			LogMarkupText(logger, LogLevel.Info, $"Custom logging configuration loaded [{SuccessColor}]successfully[/].");
 
 		FullUserConfiguration UserConfig;
 		const string CurrentConfigVersion = "0.3.2";
