@@ -65,7 +65,7 @@ public static partial class BDSM
 				case TaskStatus.Faulted:
 					AggregateException taskex = completed_task.Exception!;
 					exceptions.Add(taskex);
-					logger.Log(LogLevel.Info, taskex.Flatten().InnerException, "A task was faulted.");
+					logger.Log(LogLevel.Warn, taskex.Flatten().InnerException, "A task was faulted.");
 					if (taskex.InnerException is not FTPConnectionException)
 						//if (taskex.InnerException is not FTPConnectionException or FTPTaskAbortedException)
 							cts.Cancel();
