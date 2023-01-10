@@ -57,11 +57,15 @@ public static partial class BDSM
 			Task completed_task = tasks[completed_task_idx];
 			switch (completed_task.Status)
 			{
-				case TaskStatus.RanToCompletion or TaskStatus.Canceled:
+				case TaskStatus.RanToCompletion:
+					break;
+				case TaskStatus.Canceled:
+					logger.Log(LogLevel.Info, completed_task.Exception, "A task was canceled.");
 					break;
 				case TaskStatus.Faulted:
 					AggregateException taskex = completed_task.Exception!;
 					exceptions.Add(taskex);
+					logger.Log(LogLevel.Info, taskex.Flatten().InnerException, "A task was faulted.");
 					if (taskex.InnerException is not FTPConnectionException)
 						//if (taskex.InnerException is not FTPConnectionException or FTPTaskAbortedException)
 							cts.Cancel();

@@ -134,7 +134,6 @@ public record Configuration
 	}
 	public static FullUserConfiguration GetUserConfiguration(out string config_version, string? config_yaml = null)
 	{
-		Dictionary<string, string> _upgrade_info = new();
 		Deserializer yaml_deserializer = new();
 		RawUserConfiguration raw_config;
 		try

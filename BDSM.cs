@@ -29,26 +29,28 @@ public static partial class BDSM
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleCP(uint wCodePageID);
+	internal static readonly ILogger logger = LogManager.GetCurrentClassLogger();
+	static void CtrlCHandler(object sender, ConsoleCancelEventArgs args)
+	{
+		Console.WriteLine("");
+		LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Update aborted, shutting down.[/]");
+		LogManager.Flush();
+		LogManager.Shutdown();
+		args.Cancel = false; Environment.Exit(1);
+	}
 
 	public static async Task<int> Main()
 	{
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
-		ILogger logger = LogManager.GetCurrentClassLogger();
-		void CtrlCHandler(object sender, ConsoleCancelEventArgs args)
-		{
-			Console.WriteLine("");
-			LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Update aborted, shutting down.[/]");
-			LogManager.Shutdown();
-			args.Cancel = false; Environment.Exit(1);
-		}
 		Console.CancelKeyPress += CtrlCHandler!;
-		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger);
+		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger, "Debug");
+		logger.Info("== Begin BDSM log ==");
+		logger.Debug("Logger initialized.");
+
 		if (is_custom_logger)
 			LogMarkupText(logger, LogLevel.Info, $"Custom logging configuration loaded [{SuccessColor}]successfully[/].");
-		logger.Info("== Begin BDSM log ==");
 		InitalizeLibraryLoggers(logger);
-
 		FTPFunctionOptions FTPOptions = new() { BufferSize = 65536 };
 
 		FullUserConfiguration UserConfig;

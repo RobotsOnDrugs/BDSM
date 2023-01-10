@@ -19,22 +19,18 @@ internal static class LoggingConfiguration
 		Footer = NLog.Layouts.Layout.FromString("[${longdate}] ${level}: == End BDSM log =="),
 		ArchiveOldFileOnStartupAboveSize = 1024 * 1024
 	};
-	internal static NLog.Config.LoggingConfiguration LoadCustomConfiguration(out bool is_custom)
+	internal static NLog.Config.LoggingConfiguration LoadCustomConfiguration(out bool is_custom, string loglevel_name = "Info")
 	{
 		NLog.Config.LoggingConfiguration config;
-		try
-		{
+		is_custom = File.Exists("nlog.config");
+		if (is_custom)
 			config = new NLog.Config.XmlLoggingConfiguration("nlog.config");
-			is_custom = true;
-			return config;
-		}
-		catch (Exception ex) when (ex is NLogConfigurationException or FileNotFoundException)
+		else
 		{
 			config = new();
-			config.AddRule(LogLevel.Info, LogLevel.Fatal, default_logfile_config);
-			is_custom = false;
-			return config;
+			config.AddRule(LogLevel.FromString(loglevel_name), LogLevel.Fatal, default_logfile_config);
 		}
+		return config;
 	}
 	internal static void LogMarkupText(ILogger logger, LogLevel log_level, string markup_text, bool newline = true)
 	{
