@@ -5,11 +5,14 @@ using ShellProgressBar;
 
 using BDSM.Lib;
 using static BDSM.Lib.Utility;
+using NLog;
 
 namespace BDSM;
 
 internal record FileDownloadProgressInformation
 {
+	private static ILogger logger = LogManager.CreateNullLogger();
+	public static void InitializeLogger(ILogger parent) => logger = parent;
 	public required string FilePath { get; init; }
 	public long TotalBytesDownloaded { get; set; } = 0;
 	public string TotalBytesDownloadedString => FormatBytes(TotalBytesDownloaded);
@@ -33,6 +36,7 @@ internal record FileDownloadProgressInformation
 
 	private void TrackCurrentSpeed()
 	{
+		logger.Debug($"Tracking current speed for {FilePath}.");
 		while (TotalBytesDownloaded < TotalFileSize)
 		{
 			PreviousBytesDownloaded = TotalBytesDownloaded;
@@ -49,6 +53,7 @@ internal record FileDownloadProgressInformation
 		ProgressUpdateStopwatch.Start();
 		_ = Task.Run(TrackCurrentSpeed);
 		IsInitialized = true;
+		logger.Debug($"Download of {FilePath} was initialized.");
 	}
 	internal void Complete(bool successful)
 	{
@@ -57,10 +62,13 @@ internal record FileDownloadProgressInformation
 		ProgressUpdateStopwatch.Stop();
 		FileProgressBar.Dispose();
 		IsComplete = true;
+		logger.Debug($"""Download of {FilePath} was completed {(successful ? "successfully" : "unsuccessfully")}""");
 	}
 }
 internal static class DownloadProgress
 {
+	private static ILogger logger = LogManager.CreateNullLogger();
+	public static void InitializeLogger(ILogger parent) => logger = parent;
 	internal const int UPDATE_INTERVAL_MILLISECONDS = 100;
 	internal static ProgressBar TotalProgressBar = null!;
 	internal static readonly ProgressBarOptions DefaultTotalProgressBarOptions = new()
@@ -79,11 +87,13 @@ internal static class DownloadProgress
 		ProgressBarOnBottom = true,
 		ProgressCharacter = '─',
 	};
-	internal record TotalDownloadStatus
+	private static bool TrackingTotalCurrentSpeed = false;
+	internal static readonly TotalDownloadStatus DLStatus = new();
+	internal class TotalDownloadStatus
 	{
-		internal required int NumberOfFilesToDownload = 0;
-		internal required int TotalNumberOfFilesToDownload = 0;
-		internal required long TotalBytesToDownload = 0;
+		internal int NumberOfFilesToDownload = 0;
+		internal int TotalNumberOfFilesToDownload = 0;
+		internal long TotalBytesToDownload = 0;
 		internal string TotalBytesToDownloadString => FormatBytes(TotalBytesToDownload);
 		internal long TotalBytesDownloaded = 0;
 		internal string TotalBytesDownloadedString => FormatBytes(TotalBytesDownloaded);
@@ -114,16 +124,21 @@ internal static class DownloadProgress
 
 		internal void ReportProgress(ChunkDownloadProgressInformation progressinfo, string filepath)
 		{
-			lock (FileDownloadsInformation)
+			if (filepath is null)
+				throw new ArgumentNullException(filepath, "A chunk was null.");
+			lock (DLStatus.FileDownloadsInformation)
 			{
-				FileDownloadProgressInformation file_download_progress = FileDownloadsInformation[filepath];
+				FileDownloadProgressInformation file_download_progress = DLStatus.FileDownloadsInformation[filepath];
 				file_download_progress.Initialize();
 				file_download_progress.TotalBytesDownloaded += progressinfo.BytesDownloaded;
 
+				if (file_download_progress.TotalBytesDownloaded > file_download_progress.TotalFileSize) throw new BDSM.BDSMInternalFaultException("Total chunk bytes is greater than the chunk length.");
 				if (file_download_progress.TotalBytesDownloaded == file_download_progress.TotalFileSize)
 				{
-					Debug.Assert(NumberOfFilesToDownload > 0);
-					_ = Interlocked.Decrement(ref NumberOfFilesToDownload);
+					Debug.Assert(DLStatus.NumberOfFilesToDownload > 0);
+					_ = Interlocked.Decrement(ref DLStatus.NumberOfFilesToDownload);
+					logger.Debug($"Completed download of a file: {Path.GetRelativePath(BDSM.UserConfig.GamePath, filepath)}");
+					logger.Debug($"""{Pluralize(DLStatus.NumberOfFilesToDownload, " file")} remain.""");
 					lock (TotalProgressBar)
 					{
 						file_download_progress.FileProgressBar.Dispose();
@@ -141,10 +156,9 @@ internal static class DownloadProgress
 				}
 				FileDownloadsInformation[filepath] = file_download_progress;
 			}
-			_ = Interlocked.Add(ref TotalBytesDownloaded, progressinfo.BytesDownloaded);
-
-			int downloads_finished = TotalNumberOfFilesToDownload - NumberOfFilesToDownload;
-			int downloads_in_progress = FileDownloadsInformation.Count(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
+			_ = Interlocked.Add(ref DLStatus.TotalBytesDownloaded, progressinfo.BytesDownloaded);
+			int downloads_finished = DLStatus.TotalNumberOfFilesToDownload - DLStatus.NumberOfFilesToDownload;
+			int downloads_in_progress = DLStatus.FileDownloadsInformation.Count(info => info.Value.IsInitialized && (info.Value.TotalBytesDownloaded < info.Value.TotalFileSize));
 			int downloads_in_queue = FileDownloadsInformation.Count(info => !info.Value.IsInitialized);
 
 			if (ProgressUpdateStopwatch.ElapsedMilliseconds > UPDATE_INTERVAL_MILLISECONDS)
@@ -152,14 +166,13 @@ internal static class DownloadProgress
 				lock (TotalProgressBar)
 				{
 					string total_progress_message = $"Downloading files ({downloads_finished} done / {downloads_in_progress} in progress / {downloads_in_queue} remaining): " +
-						$"{TotalBytesDownloadedString} / {TotalBytesToDownloadString} " +
+						$"{DLStatus.TotalBytesDownloadedString} / {DLStatus.TotalBytesToDownloadString} " +
 						$"(Current speed: {TotalCurrentSpeedString}) " +
-						$"(Average speed: {FormatBytes(TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
-					TotalProgressBar.Tick((int)(TotalBytesDownloaded / 1024), ETA, total_progress_message);
+						$"(Average speed: {FormatBytes(DLStatus.TotalBytesDownloaded / DLStatus.DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
+					TotalProgressBar.Tick((int)(DLStatus.TotalBytesDownloaded / 1024), ETA, total_progress_message);
 					ProgressUpdateStopwatch.Restart();
 				}
 			}
 		}
 	}
-	private static bool TrackingTotalCurrentSpeed = false;
 }

@@ -29,7 +29,8 @@ public static partial class BDSM
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleCP(uint wCodePageID);
-	internal static readonly ILogger logger = LogManager.GetCurrentClassLogger();
+	private static readonly ILogger logger = LogManager.GetCurrentClassLogger();
+	internal static FullUserConfiguration UserConfig;
 	static void CtrlCHandler(object sender, ConsoleCancelEventArgs args)
 	{
 		Console.WriteLine("");
@@ -44,16 +45,20 @@ public static partial class BDSM
 		_ = SetConsoleOutputCP(65001);
 		_ = SetConsoleCP(65001);
 		Console.CancelKeyPress += CtrlCHandler!;
-		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger, "Debug");
+#if DEBUG
+		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger, LogLevel.Debug);
+#else
+		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger, LogLevel.Info);
+#endif
 		logger.Info("== Begin BDSM log ==");
-		logger.Debug("Logger initialized.");
+		logger.Debug("== Begin BDSM debug log ==");
+		logger.Info("Logger initialized.");
 
 		if (is_custom_logger)
 			LogMarkupText(logger, LogLevel.Info, $"Custom logging configuration loaded [{SuccessColor}]successfully[/].");
 		InitalizeLibraryLoggers(logger);
 		FTPFunctionOptions FTPOptions = new() { BufferSize = 65536 };
 
-		FullUserConfiguration UserConfig;
 		const string CurrentConfigVersion = "0.3.2";
 		string user_config_version = CurrentConfigVersion;
 		try { UserConfig = GetUserConfiguration(out user_config_version); }
@@ -136,6 +141,7 @@ public static partial class BDSM
 
 		if (SkipScan)
 		{
+			logger.Info("SkipScan is enabled.");
 			using FtpClient _scanner = SetupFTPClient(UserConfig.ConnectionInfo);
 			_scanner.Connect();
 			foreach (PathMapping pathmap in GetPathMappingsFromSkipScanConfig(_skip_config, UserConfig))
@@ -213,7 +219,7 @@ public static partial class BDSM
 			foreach (Exception inner_ex in aex.Flatten().InnerExceptions)
 			{
 				AnsiConsole.MarkupLine($"[{ErrorColorAlt}]{inner_ex.Message}[/]");
-				logger.Error(inner_ex);
+				logger.Warn(inner_ex);
 			}
 			AnsiConsole.MarkupLine($"[{ErrorColor}]See the log for full error details.[/]");
 			if (UserConfig.PromptToContinue)
@@ -308,12 +314,9 @@ public static partial class BDSM
 
 		if (!FilesToDownload.IsEmpty)
 		{
-			TotalDownloadStatus DLStatus = new()
-			{
-				TotalNumberOfFilesToDownload = FilesToDownload.Count,
-				NumberOfFilesToDownload = FilesToDownload.Count,
-				TotalBytesToDownload = FilesToDownload.Select(file_dl => file_dl.TotalFileSize).Sum()
-			};
+			DLStatus.TotalNumberOfFilesToDownload = FilesToDownload.Count;
+			DLStatus.NumberOfFilesToDownload = FilesToDownload.Count;
+			DLStatus.TotalBytesToDownload = FilesToDownload.Select(file_dl => file_dl.TotalFileSize).Sum();
 			DLStatus.TotalNumberOfFilesToDownload = FilesToDownload.Count;
 			DLStatus.NumberOfFilesToDownload = FilesToDownload.Count;
 			LogMarkupText(logger, LogLevel.Info, $"[{HighlightColor}]{Pluralize(DLStatus.NumberOfFilesToDownload, " file")}[/] ([{HighlightColor}]{FormatBytes(DLStatus.TotalBytesToDownload)}[/]) to download.");
@@ -343,6 +346,9 @@ public static partial class BDSM
 					chunks.Enqueue(chunk);
 			}
 			int download_task_count = (UserConfig.ConnectionInfo.MaxConnections < chunks.Count) ? UserConfig.ConnectionInfo.MaxConnections : chunks.Count;
+			logger.Debug("Chunks to download:");
+			foreach (DownloadChunk chunk in chunks)
+				logger.Debug($"{chunk.FileName} at offset {chunk.Offset}");
 			List<Task> download_tasks = new();
 			List<Task> finished_download_tasks = new();
 			using CancellationTokenSource download_cts = new();
@@ -358,6 +364,7 @@ public static partial class BDSM
 			catch (OperationCanceledException) { download_canceled = true; }
 			catch (AggregateException ex) { download_failures = ex; }
 			DLStatus.DownloadSpeedStopwatch.Stop();
+			logger.Debug($"Chunks left after processing: {chunks.Count}");
 			Console.CancelKeyPress += CtrlCHandler!;
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in DLStatus.FileDownloadsInformation)
 			{
@@ -380,7 +387,7 @@ public static partial class BDSM
 			{
 				LogMarkupText(logger, LogLevel.Error, "[red3]Could not download some files. Check the log for error details.[/]");
 				foreach (Exception inner_ex in download_failures.Flatten().InnerExceptions)
-					logger.Error(inner_ex);
+					logger.Warn(inner_ex);
 			}
 			int number_of_downloads_finished = DLStatus.TotalNumberOfFilesToDownload - DLStatus.NumberOfFilesToDownload;
 			IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> queued_downloads = DLStatus.FileDownloadsInformation.Where(info => !info.Value.IsInitialized);

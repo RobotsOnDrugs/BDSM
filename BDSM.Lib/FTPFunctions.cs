@@ -17,12 +17,8 @@ public static class FTPFunctions
 		public FTPFunctionOptions() { }
 		public int BufferSize { get; init; } = 65536;
 	}
-	private const string prefix = "FTPFunctions";
-	private static readonly ILogger null_logger = LogManager.CreateNullLogger();
-	internal static ILogger parent_logger = null_logger;
-	private static ConsolidatedLogger logger = new(null, prefix);
-	public static void SetLogger(ILogger parent) { parent_logger = (parent_logger == null_logger) ? parent : throw new InvalidOperationException(); logger = new(parent_logger, prefix); parent_logger.Info($"[{prefix}] Logger initialized."); }
-
+	private static ILogger logger = LogManager.CreateNullLogger();
+	public static void InitializeLogger(ILogger parent) => logger = parent;
 	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo) =>
 		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
 	public static FtpClient DefaultSideloaderClient() => SetupFTPClient(BetterRepackRepositoryDefinitions.DefaultConnectionInfo);
@@ -37,6 +33,7 @@ public static class FTPFunctions
 			{
 				client.Connect();
 				success = true;
+				logger.Debug("An FTP connection was successful");
 				break;
 			}
 			catch (FtpCommandException ex)
@@ -50,8 +47,8 @@ public static class FTPFunctions
 					case FtpResponseType.PermanentNegativeCompletion:
 						throw;
 					case FtpResponseType.PositivePreliminary or FtpResponseType.PositiveCompletion or FtpResponseType.PositiveIntermediate:
-						logger.Error("FtpCommandException was thrown with a positive response.");
-						logger.Log(LogLevel.Error, ex, prefix);
+						logger.Warn("FtpCommandException was thrown with a positive response.");
+						logger.Log(LogLevel.Error, ex);
 						Debugger.Break();
 						retries++;
 						break;
@@ -60,6 +57,8 @@ public static class FTPFunctions
 				}
 			}
 		}
+		if (!success)
+			logger.Debug("Failed to establish an FTP connection.");
 		return success;
 	}
 	public static void GetFilesOnServer(ref ConcurrentBag<PathMapping> paths_to_scan, ref ConcurrentDictionary<string, PathMapping> files_found, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct)
@@ -74,8 +73,8 @@ public static class FTPFunctions
 		FtpException? last_ftp_exception = null;
 		List<Exception> accumulated_exceptions = new();
 		bool retrying_scan = false;
-		using FtpClient scanclient = SetupFTPClient(repoinfo);
-		if (!TryConnect(scanclient))
+		using FtpClient download_client = SetupFTPClient(repoinfo);
+		if (!TryConnect(download_client))
 			throw new FTPConnectionException();
 
 		ScanQueueWaitStatus[tid] = true;
@@ -84,7 +83,7 @@ public static class FTPFunctions
 			ScanQueueWaitStatus[tid] = false;
 			if (accumulated_exceptions.Count > 2)
 			{
-				scanclient.Dispose();
+				download_client.Dispose();
 				throw new AggregateException(accumulated_exceptions);
 			}
 			if (!retrying_scan)
@@ -108,7 +107,7 @@ public static class FTPFunctions
 			ct.ThrowIfCancellationRequested();
 			try
 			{
-				scanned_files = scanclient.GetListing(remotepath);
+				scanned_files = download_client.GetListing(remotepath);
 				retrying_scan = false;
 			}
 			catch (Exception ex) when (ex is FtpCommandException or IOException)
@@ -118,7 +117,7 @@ public static class FTPFunctions
 				if (scan_attempts == 3)
 				{
 					paths_to_scan.Add(pathmap);
-					scanclient.Dispose();
+					download_client.Dispose();
 					throw;
 				}
 				continue;
@@ -151,7 +150,7 @@ public static class FTPFunctions
 						break;
 				}
 		}
-		scanclient.Dispose();
+		download_client.Dispose();
 	}
 
 	[Obsolete("This should no longer be needed with the new simplified configuration and is likely to be removed in a future release.")]
@@ -168,14 +167,9 @@ public static class FTPFunctions
 		return bad_entries;
 	}
 
-	public static void DownloadFileChunks(Configuration.RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, Action<ChunkDownloadProgressInformation, string> reportprogress, CancellationToken ct)
+	public static void DownloadFileChunks(Configuration.RepoConnectionInfo repoinfo, in ConcurrentQueue<DownloadChunk> chunks, in Action<ChunkDownloadProgressInformation, string> reportprogress, CancellationToken ct)
 	{
-		FTPTaskAbortedException SetupAbortException(string message, string filepath, Exception? inner_ex = null)
-		{
-			FTPTaskAbortedException task_abort_ex = inner_ex is not null ? new(message) : new(message, inner_ex);
-			task_abort_ex.Data["File"] = filepath;
-			return task_abort_ex;
-		}
+		int tid = Environment.CurrentManagedThreadId;
 		byte[] buffer = new byte[Options.BufferSize];
 		FileStream local_filestream = null!;
 		using FtpClient client = SetupFTPClient(repoinfo);
@@ -184,10 +178,23 @@ public static class FTPFunctions
 		DownloadChunk chunk = default;
 		Stopwatch CurrentStopwatch = new();
 		bool canceled = ct.IsCancellationRequested;
-		while (!canceled && chunks.TryDequeue(out chunk))
+		bool is_reported_or_just_starting = true;
+		while (!canceled)
 		{
+			if (!is_reported_or_just_starting)
+				Debugger.Break();
+			is_reported_or_just_starting = false;
 			if (!TryConnect(client))
+			{
+				logger.Warn($"[Managed thread {tid}] An FTP connection failed to be established.");
 				throw new FTPConnectionException();
+			}
+			if (!chunks.TryDequeue(out chunk))
+			{
+				logger.Debug($"[Managed thread {tid}] No more chunks left.");
+				break;
+			}
+			logger.Debug($"A chunk was taken: {chunk.FileName} at {chunk.Offset}");
 			if (chunk.LocalPath != local_filestream?.Name)
 			{
 				local_filestream?.Dispose();
@@ -198,16 +205,13 @@ public static class FTPFunctions
 			int connection_retries = 0;
 			while (true)
 			{
-				try
-				{
-					ftp_filestream = client.OpenRead(chunk.RemotePath, FtpDataType.Binary, chunk.Offset, chunk.Offset + chunk.Length);
-					break;
-				}
+				try { ftp_filestream = client.OpenRead(chunk.RemotePath, FtpDataType.Binary, chunk.Offset, chunk.Offset + chunk.Length); break; }
 				catch (Exception) when (connection_retries <= 2) { connection_retries++; }
 				catch (Exception)
 				{
 					Cleanup();
-					reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
+					logger.Debug($"[Managed thread {tid}] A chunk was requeued because of failed FTP download connection: {chunk.FileName} at {chunk.Offset}");
+					chunks.Enqueue(chunk);
 					throw;
 				}
 			}
@@ -217,17 +221,18 @@ public static class FTPFunctions
 			int remaining_bytes = chunk.Length;
 			int bytes_to_process = 0;
 			Stopwatch write_time = new();
+			is_reported_or_just_starting = true;
 			while (true)
 			{
+				if (!is_reported_or_just_starting)
+					Debugger.Break();
+				is_reported_or_just_starting = false;
 				if (ct.IsCancellationRequested)
 				{
-					try { local_filestream.Unlock(chunk.Offset, chunk.Length); }
-					catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { Debugger.Break(); }
-					reportprogress(new ChunkDownloadProgressInformation() { BytesDownloaded = 0, TimeElapsed = CurrentStopwatch.Elapsed, TotalChunkSize = chunk.Length }, chunk.LocalPath);
+					logger.Debug($"[Managed thread {tid}] Cancellation was requested after an FTP download connection was established.");
+					canceled = true;
 					break;
 				}
-				if (total_chunk_bytes > chunk.Length) { throw new BDSMInternalFaultException("total chunk bytes is greater than the chunk length"); }
-				if (total_chunk_bytes == chunk.Length) break;
 				bytes_to_process = (buffer.Length < remaining_bytes) ? buffer.Length : remaining_bytes;
 				try
 				{
@@ -250,7 +255,8 @@ public static class FTPFunctions
 						FTPTaskAbortedException => "write timeout",
 						_ => $"Unexpected error: {ex.Message}"
 					};
-					reportprogress(new ChunkDownloadProgressInformation() { BytesDownloaded = 0, TimeElapsed = CurrentStopwatch.Elapsed, TotalChunkSize = chunk.Length }, chunk.LocalPath);
+					logger.Debug($"[Managed thread {tid}] A write operation failed. ({message})");
+					throw;
 				}
 				progressinfo = new()
 				{
@@ -258,19 +264,31 @@ public static class FTPFunctions
 					TimeElapsed = CurrentStopwatch.Elapsed,
 					TotalChunkSize = chunk.Length
 				};
+				local_filestream.Flush();
+				is_reported_or_just_starting = true;
+				if (total_chunk_bytes > chunk.Length) { throw new BDSMInternalFaultException("Total chunk bytes is greater than the chunk length."); }
+				if (total_chunk_bytes == chunk.Length) break;
+				reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 				if (ct.IsCancellationRequested)
 				{
-					try { local_filestream.Unlock(chunk.Offset, chunk.Length); }
-					catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { Debugger.Break(); }
+					logger.Debug($"[Managed thread {tid}] Cancellation was requested after a chunk download was complete.");
+					canceled = true;
+					break;
 				}
-				local_filestream.Flush();
-				reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 			}
 			try { local_filestream.Unlock(chunk.Offset, chunk.Length); }
-			catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { Debugger.Break(); }
+			catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { }
 			ftp_filestream.Dispose();
 			CurrentStopwatch.Stop();
-			reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
+			if (!canceled)
+			{
+				logger.Debug($"[Managed thread {tid}] Reporting completion of a chunk (line 293): {chunk.FileName} at {chunk.Offset}");
+				reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
+				is_reported_or_just_starting = true;
+			}
+			if (!is_reported_or_just_starting)
+				Debugger.Break();
+			logger.Debug($"""[Managed thread {tid}] Exiting chunk processing loop{(canceled ? " (canceled)" : "")}: {chunk.FileName} at {chunk.Offset}""");
 		}
 		try { local_filestream?.Unlock(chunk.Offset, chunk.Length); }
 		catch (IOException ex) when (ex.Message.StartsWith("The segment is already unlocked.")) { }
@@ -279,6 +297,10 @@ public static class FTPFunctions
 		client.Disconnect();
 		client.Dispose();
 		if (chunk.FileName is not null)
+		{
+			logger.Debug($"[Managed thread {tid}] Reporting completion of a chunk (line 310): {chunk.FileName} at {chunk.Offset}");
 			reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
+			is_reported_or_just_starting = true;
+		}
 	}
 }

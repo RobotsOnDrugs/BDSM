@@ -1,14 +1,18 @@
 using System.Collections.Immutable;
 using System.Text;
 
+using NLog;
+
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 
 using static BDSM.Lib.BetterRepackRepositoryDefinitions;
 
 namespace BDSM.Lib;
-public record Configuration
+public static class Configuration
 {
+	private static ILogger logger = LogManager.CreateNullLogger();
+	public static void InitializeLogger(ILogger parent) => logger = parent;
 	internal const string USER_CONFIG_FILENAME = "UserConfiguration.yaml";
 	public static readonly SimpleUserConfiguration.Modpacks DefaultModpacksSimpleHS2 = new()
 	{
@@ -116,6 +120,7 @@ public record Configuration
 	public static async Task<string> ReadConfigAndDisposeAsync(string filename) { using StreamReader reader = File.OpenText(filename); return await reader.ReadToEndAsync(); }
 	public static async Task<FullUserConfiguration> GetOldUserConfigurationAsync()
 	{
+		logger.Info("Creating configuration from the old format.");
 		Deserializer yaml_deserializer = new();
 
 		OldUserConfiguration old_config;
@@ -130,6 +135,7 @@ public record Configuration
 			};
 			throw new UserConfigurationException(ucex_message, ex);
 		}
+		logger.Info("Reading old configuration format was successful. Converting to the new format.");
 		return ConvertOldUserConfig(old_config);
 	}
 	public static FullUserConfiguration GetUserConfiguration(out string config_version, string? config_yaml = null)
@@ -158,11 +164,13 @@ public record Configuration
 	}
 	private static SimpleUserConfiguration ValidateRawUserConfiguration(RawUserConfiguration nullable_config, out string config_version)
 	{
+		logger.Debug("Validating user configuration");
 		if (nullable_config.GamePath is null)
 			throw new UserConfigurationException("GamePath is missing from the configuration file.");
 		bool is_hs2 = GamePathIsHS2(nullable_config.GamePath) ?? throw new UserConfigurationException($"{nullable_config.GamePath} is not a valid HS2 or AIS game directory.");
 		config_version = nullable_config.OptionalModpacks?.Main is null ? "0.3" : "0.3.2";
 		bool studio = nullable_config.OptionalModpacks?.Studio ?? DefaultModpacksSimpleHS2.Studio;
+		logger.Debug("User configuration was verified.");
 		return new()
 		{
 			GamePath = nullable_config.GamePath,
