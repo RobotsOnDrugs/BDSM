@@ -190,19 +190,25 @@ public static partial class BDSM
 			List<Exception> scan_exceptions = new();
 			foreach (Task finished_scan_task in finished_scan_tasks)
 			{
-				if (!finished_scan_task.IsFaulted)
-					all_faulted = false;
-				else
-					scan_exceptions.Add(finished_scan_task.Exception!);
-				if (all_faulted)
-					throw new AggregateException(scan_exceptions);
-				if (finished_scan_task.IsCompletedSuccessfully)
-					none_successful = false;
-				else
-					scan_exceptions.Add(finished_scan_task.Exception!);
-				if (finished_scan_task.IsCanceled)
-					throw new OperationCanceledException("Scanning was canceled");
+				switch (finished_scan_task.Status)
+				{
+					case TaskStatus.Faulted:
+						scan_exceptions.Add(finished_scan_task.Exception!);
+						break;
+					case TaskStatus.RanToCompletion:
+						all_faulted = false;
+						none_successful = false;
+						break;
+					case TaskStatus.Canceled:
+						all_faulted = false;
+						throw new OperationCanceledException("Scanning was canceled");
+					default:
+						all_faulted = false;
+						break;
+				}
 			}
+			if (all_faulted)
+				throw new AggregateException(scan_exceptions);
 		}
 		catch (OperationCanceledException)
 		{
@@ -214,17 +220,20 @@ public static partial class BDSM
 		}
 		catch(AggregateException aex)
 		{
-			Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
-			LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Could not scan the server. Failed scan tasks had the following errors:[/]");
-			foreach (Exception inner_ex in aex.Flatten().InnerExceptions)
+			if (all_faulted || none_successful)
 			{
-				AnsiConsole.MarkupLine($"[{ErrorColorAlt}]{inner_ex.Message}[/]");
-				logger.Warn(inner_ex);
+				Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
+				LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Could not scan the server. Failed scan tasks had the following errors:[/]");
+				foreach (Exception inner_ex in aex.Flatten().InnerExceptions)
+				{
+					AnsiConsole.MarkupLine($"[{ErrorColorAlt}]{inner_ex.Message}[/]");
+					logger.Warn(inner_ex);
+				}
+				AnsiConsole.MarkupLine($"[{ErrorColor}]See the log for full error details.[/]");
+				if (UserConfig.PromptToContinue)
+					PromptBeforeExit();
+				return 1;
 			}
-			AnsiConsole.MarkupLine($"[{ErrorColor}]See the log for full error details.[/]");
-			if (UserConfig.PromptToContinue)
-				PromptBeforeExit();
-			return 1;
 		}
 		Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
 		Console.CancelKeyPress += CtrlCHandler!;
