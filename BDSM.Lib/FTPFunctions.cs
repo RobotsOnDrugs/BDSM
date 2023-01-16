@@ -20,7 +20,7 @@ public static class FTPFunctions
 	private static ILogger logger = LogManager.CreateNullLogger();
 	public static void InitializeLogger(ILogger parent) => logger = parent;
 	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo) =>
-		new(repoinfo.Address, repoinfo.Username, repoinfo.EffectivePassword, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
+		new(repoinfo.Address, repoinfo.Username, repoinfo.Password, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
 	public static FtpClient DefaultSideloaderClient() => SetupFTPClient(BetterRepackRepositoryDefinitions.DefaultConnectionInfo);
 	public static bool TryConnect(FtpClient client, int max_retries = 3)
 	{

@@ -1,4 +1,6 @@
 ﻿using System.Collections.Immutable;
+using System.Numerics;
+using static System.Convert;
 
 using FluentFTP;
 
@@ -127,16 +129,19 @@ public static class BetterRepackRepositoryDefinitions
 	public static string UserDataModpackName(bool is_hs2) => is_hs2 ? UserDataHS2ModpackName : UserDataAISModpackName;
 	public static string ExclusiveModpack(bool is_hs2) => is_hs2 ? ExclusiveHS2ModpackName : ExclusiveAISModpackName;
 
-	public static readonly RepoConnectionInfo DefaultConnectionInfo = new()
-	{
-		Address = "sideload.betterrepack.com",
-		Username = "sideloader",
-		Password = null,
-		PasswordB64 = "c2lkZWxvYWRlcjM =",
-		Port = 2121,
-		RootPath = "/AI/",
-		MaxConnections = 5
+	public static readonly HashSet<RepoConnectionInfo> RepoConnectionInfos = new()
+	{	new()
+		{
+			Address = Nice("ɜɒɍɎɕɘɊɍȗɋɎɝɝɎɛɛɎəɊɌɔȗɌɘɖ"),
+			Username = Nice("ɜɒɍɎɕɘɊɍɎɛ"),
+			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
+			Port = Nice<int>("țȚțȚ"),
+			RootPath = Nice("ȘȪȲȘ"),
+			MaxConnections = Nice<int>("Ȟ"),
+		}
 	};
+	public static readonly RepoConnectionInfo DefaultConnectionInfo = RepoConnectionInfos.First();
+
 	public static FtpConfig DefaultRepoConnectionConfig => new()
 	{
 		EncryptionMode = FtpEncryptionMode.Auto,
@@ -163,5 +168,34 @@ public static class BetterRepackRepositoryDefinitions
 			_ = modpack_pathmaps.Add(ModpackDefinitionToPathMapping(definition, gamepath, rootpath));
 		}
 		return modpack_pathmaps.ToImmutableHashSet();
+	}
+
+	public static string Nice(string sixtynine)
+	{
+		string clear = string.Empty;
+		foreach (char c in sixtynine)
+			clear += ToChar(ToInt32(c) - (69 + 420));
+		return clear;
+	}
+	public static int Nice<T>(string sixtynine) where T : IBinaryInteger<int>
+	{
+		string clear = string.Empty;
+		foreach (char c in sixtynine)
+			clear += ToChar(ToInt32(c) - (69 + 420));
+		return ToInt32(clear);
+	}
+	public static string SixtyNine(string clear)
+	{
+		string sixtynine = string.Empty;
+		foreach (char c in clear)
+			sixtynine += ToChar(ToInt32(c) + 69 + 420);
+		return sixtynine;
+	}
+	public static string SixtyNine(int clear)
+	{
+		string sixtynine = string.Empty;
+		foreach (char c in clear.ToString())
+			sixtynine += ToChar(c + 69 + 420);
+		return sixtynine;
 	}
 }

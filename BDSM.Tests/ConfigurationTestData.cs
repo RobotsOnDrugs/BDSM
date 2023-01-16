@@ -177,13 +177,12 @@ OptionalModpacks:
         GamePath = ValidGamePath,
         ConnectionInfo = new()
         {
-        Address = "other.place.com",
-        Username = "user",
-        Password = "pass",
-        PasswordB64 = null,
-        MaxConnections = 4,
-        Port = 21,
-        RootPath = "/mods/"
+			Address = "other.place.com",
+			Username = "user",
+			Password = "pass",
+			MaxConnections = 4,
+			Port = 21,
+			RootPath = "/mods/"
         },
         BaseSideloaderDirectories = OldConfigModpackDefaults,
         PromptToContinue = true
