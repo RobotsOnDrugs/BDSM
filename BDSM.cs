@@ -163,7 +163,7 @@ public static partial class BDSM
 			try { BaseDirectoriesToScan = UserConfig.BasePathMappings; }
 			catch (FormatException)
 			{
-				LogMarkupText(logger, LogLevel.Error,"Your configuration file is malformed. Please reference the example and read the documentation.");
+				LogMarkupText(logger, LogLevel.Error, "Your configuration file is malformed. Please reference the example and read the documentation.");
 				PromptBeforeExit();
 				return 1;
 			}
@@ -173,73 +173,76 @@ public static partial class BDSM
 
 		logger.Debug($"Using {UserConfig.ConnectionInfo.Address}");
 		Stopwatch OpTimer = new();
-		const string scan_server_message = "Scanning the server.";
-		LogMarkupText(logger, LogLevel.Info, scan_server_message, false);
-		OpTimer.Start();
-		List<Task> scan_tasks = new();
-		List<Task> finished_scan_tasks = new();
-		using CancellationTokenSource scan_cts = new();
-		CancellationToken scan_ct = scan_cts.Token;
-		Console.CancelKeyPress -= CtrlCHandler!;
-		for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
-			scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, ref FilesOnServer, UserConfig.ConnectionInfo, scan_ct), scan_ct));
-		bool all_faulted = true;
 		bool none_successful = true;
-		try
-		{
-			finished_scan_tasks = ProcessTasks(scan_tasks, scan_cts);
-			Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
-			List<Exception> scan_exceptions = new();
-			foreach (Task finished_scan_task in finished_scan_tasks)
+		bool all_faulted = true;
+		Console.CancelKeyPress -= CtrlCHandler!;
+		bool successful_scan = AnsiConsole.Status()
+			.AutoRefresh(true)
+			.SpinnerStyle(new(Color.Cyan1, null, null, null))
+			.Spinner(Spinner.Known.BouncingBar)
+			.Start("Scanning the server.", _ =>
 			{
-				switch (finished_scan_task.Status)
+				OpTimer.Start();
+				List<Task> scan_tasks = new();
+				List<Task> finished_scan_tasks = new();
+				using CancellationTokenSource scan_cts = new();
+				CancellationToken scan_ct = scan_cts.Token;
+				for (int i = 0; i < UserConfig.ConnectionInfo.MaxConnections; i++)
+					scan_tasks.Add(Task.Run(() => GetFilesOnServer(ref DirectoriesToScan, ref FilesOnServer, UserConfig.ConnectionInfo, scan_ct), scan_ct));
+				try
 				{
-					case TaskStatus.Faulted:
-						scan_exceptions.Add(finished_scan_task.Exception!);
-						break;
-					case TaskStatus.RanToCompletion:
-						all_faulted = false;
-						none_successful = false;
-						break;
-					case TaskStatus.Canceled:
-						all_faulted = false;
-						throw new OperationCanceledException("Scanning was canceled");
-					default:
-						all_faulted = false;
-						break;
+					finished_scan_tasks = ProcessTasks(scan_tasks, scan_cts);
+					List<Exception> scan_exceptions = new();
+					foreach (Task finished_scan_task in finished_scan_tasks)
+					{
+						switch (finished_scan_task.Status)
+						{
+							case TaskStatus.Faulted:
+								scan_exceptions.Add(finished_scan_task.Exception!);
+								break;
+							case TaskStatus.RanToCompletion:
+								all_faulted = false;
+								none_successful = false;
+								break;
+							case TaskStatus.Canceled:
+								all_faulted = false;
+								throw new OperationCanceledException("Scanning was canceled.");
+							default:
+								all_faulted = false;
+								break;
+						}
+					}
+					if (all_faulted)
+						throw new AggregateException(scan_exceptions);
 				}
-			}
-			if (all_faulted)
-				throw new AggregateException(scan_exceptions);
-		}
-		catch (OperationCanceledException)
+				catch (OperationCanceledException oex)
+				{
+					LogMarkupText(logger, LogLevel.Fatal,$"[{CancelColor}]{oex.Message}[/]");
+					return false;
+				}
+				catch (AggregateException aex)
+				{
+					if (all_faulted || none_successful)
+					{
+						LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Could not scan the server. Failed scan tasks had the following errors:[/]");
+						foreach (Exception inner_ex in aex.Flatten().InnerExceptions)
+						{
+							AnsiConsole.MarkupLine($"[{ErrorColorAlt}]{inner_ex.Message}[/]");
+							logger.Warn(inner_ex);
+						}
+						AnsiConsole.MarkupLine($"[{ErrorColor}]See the log for full error details.[/]");
+						return false;
+					}
+				}
+				return true;
+			});
+		if (!successful_scan)
 		{
-			Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
-			LogMarkupText(logger, LogLevel.Fatal, $"[{CancelColor}]Scanning was canceled.[/]");
 			if (UserConfig.PromptToContinue)
 				PromptBeforeExit();
 			return 1;
 		}
-		catch(AggregateException aex)
-		{
-			if (all_faulted || none_successful)
-			{
-				Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
-				LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Could not scan the server. Failed scan tasks had the following errors:[/]");
-				foreach (Exception inner_ex in aex.Flatten().InnerExceptions)
-				{
-					AnsiConsole.MarkupLine($"[{ErrorColorAlt}]{inner_ex.Message}[/]");
-					logger.Warn(inner_ex);
-				}
-				AnsiConsole.MarkupLine($"[{ErrorColor}]See the log for full error details.[/]");
-				if (UserConfig.PromptToContinue)
-					PromptBeforeExit();
-				return 1;
-			}
-		}
-		Console.Write('\r' + new string(' ', scan_server_message.Length) + '\r');
 		Console.CancelKeyPress += CtrlCHandler!;
-
 		if (none_successful || (FilesOnServer.IsEmpty && !DirectoriesToScan.IsEmpty))
 		{
 			LogMarkupText(logger, LogLevel.Error,$"[{ErrorColor}]Scanning could not complete due to network or other errors.[/]");
