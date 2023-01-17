@@ -129,18 +129,55 @@ public static class BetterRepackRepositoryDefinitions
 	public static string UserDataModpackName(bool is_hs2) => is_hs2 ? UserDataHS2ModpackName : UserDataAISModpackName;
 	public static string ExclusiveModpack(bool is_hs2) => is_hs2 ? ExclusiveHS2ModpackName : ExclusiveAISModpackName;
 
-	public static readonly HashSet<RepoConnectionInfo> RepoConnectionInfos = new()
+	public static readonly List<RepoConnectionInfo> RepoConnectionInfos = new()
 	{	new()
 		{
-			Address = Nice("ɜɒɍɎɕɘɊɍȗɋɎɝɝɎɛɛɎəɊɌɔȗɌɘɖ"),
+			Address = Nice("ɊɒȖɜɑɘɞɓɘȗɌɘɖ"), //ais
 			Username = Nice("ɜɒɍɎɕɘɊɍɎɛ"),
 			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
 			Port = Nice<int>("țȚțȚ"),
 			RootPath = Nice("ȘȪȲȘ"),
 			MaxConnections = Nice<int>("Ȟ"),
-		}
+		},
+		new()
+		{
+			Address = Nice("ɋɎɝɝɎɛɛɎəɊɌɔȗɌɘɖ"), //br
+			Username = Nice("ɜɒɍɎɕɘɊɍɎɛ"),
+			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
+			Port = Nice<int>("țȚțȚ"),
+			RootPath = Nice("ȘȪȲȘ"),
+			MaxConnections = Nice<int>("Ȟ"),
+		},
+		new()
+		{
+			Address = Nice("ɎɞɜțȗɋɎɝɝɎɛɛɎəɊɌɔȗɌɘɖ"), //e2
+			Username = Nice("ɜɒɍɎɕɘɊɍɎɛ"),
+			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
+			Port = Nice<int>("țȚțȚ"),
+			RootPath = Nice("ȘȪȲȘ"),
+			MaxConnections = Nice<int>("Ȟ"),
+		},
+		new()
+		{
+			Address = Nice("ɎɞɜȜȗɋɎɝɝɎɛɛɎəɊɌɔȗɌɘɖ"), //e3
+			Username = Nice("ɜɒɍɎɕɘɊɍɎɛ"),
+			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
+			Port = Nice<int>("țȚțȚ"),
+			RootPath = Nice("ȘȪȲȘ"),
+			MaxConnections = Nice<int>("Ȟ"),
+		},
+		new()
+		{
+			Address = Nice("ɜɒɍɎɕɘɊɍȗɋɎɝɝɎɛɛɎəɊɌɔȗɌɘɖ"), //side
+			Username = Nice("ɜɒɍɎɕɘɊɍɎɛ"),
+			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
+			Port = Nice<int>("țȚțȚ"),
+			RootPath = Nice("ȘȪȲȘ"),
+			MaxConnections = Nice<int>("Ȟ"),
+		},
 	};
-	public static readonly RepoConnectionInfo DefaultConnectionInfo = RepoConnectionInfos.First();
+	static readonly Random RandomRepoIdx = new();
+	public static readonly RepoConnectionInfo DefaultConnectionInfo = RepoConnectionInfos[RandomRepoIdx.Next(0, 5)];
 
 	public static FtpConfig DefaultRepoConnectionConfig => new()
 	{
@@ -184,17 +221,17 @@ public static class BetterRepackRepositoryDefinitions
 			clear += ToChar(ToInt32(c) - (69 + 420));
 		return ToInt32(clear);
 	}
-	public static string SixtyNine(string clear)
+	public static string SixtyNine(string nice)
 	{
 		string sixtynine = string.Empty;
-		foreach (char c in clear)
+		foreach (char c in nice)
 			sixtynine += ToChar(ToInt32(c) + 69 + 420);
 		return sixtynine;
 	}
-	public static string SixtyNine(int clear)
+	public static string SixtyNine(int nice)
 	{
 		string sixtynine = string.Empty;
-		foreach (char c in clear.ToString())
+		foreach (char c in nice.ToString())
 			sixtynine += ToChar(c + 69 + 420);
 		return sixtynine;
 	}

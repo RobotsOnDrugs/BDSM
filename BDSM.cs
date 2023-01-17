@@ -23,6 +23,7 @@ namespace BDSM;
 
 public static partial class BDSM
 {
+	public const string VERSION = "0.3.7";
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleOutputCP(uint wCodePageID);
@@ -50,8 +51,8 @@ public static partial class BDSM
 #else
 		LogManager.Configuration = LoadCustomConfiguration(out bool is_custom_logger, LogLevel.Info);
 #endif
-		logger.Info("== Begin BDSM log ==");
-		logger.Debug("== Begin BDSM debug log ==");
+		logger.Info($"== Begin BDSM {VERSION} log ==");
+		logger.Debug($"== Begin BDSM {VERSION} debug log ==");
 		logger.Info("Logger initialized.");
 
 		if (is_custom_logger)
@@ -89,7 +90,7 @@ public static partial class BDSM
 
 		if (GamePathIsHS2(UserConfig.GamePath) is null)
 		{
-			LogMarkupText(logger, LogLevel.Error, $"Your game path {UserConfig.GamePath.EscapeMarkup()} is not valid");
+			LogMarkupText(logger, LogLevel.Error, $"[{ErrorColor}]Your game path {UserConfig.GamePath.EscapeMarkup()} is not valid.[/]");
 			return 1;
 		}
 
@@ -170,6 +171,7 @@ public static partial class BDSM
 				DirectoriesToScan.Add(mapping);
 		}
 
+		logger.Debug($"Using {UserConfig.ConnectionInfo.Address}");
 		Stopwatch OpTimer = new();
 		const string scan_server_message = "Scanning the server.";
 		LogMarkupText(logger, LogLevel.Info, scan_server_message, false);
@@ -331,11 +333,22 @@ public static partial class BDSM
 			LogMarkupText(logger, LogLevel.Info, $"[{HighlightColor}]{Pluralize(DLStatus.NumberOfFilesToDownload, " file")}[/] ([{HighlightColor}]{FormatBytes(DLStatus.TotalBytesToDownload)}[/]) to download.");
 
 			bool display_summary_before = UserConfig.PromptToContinue && AnsiConsole.Confirm("Show summary?", true);
+#if DEBUG
+			if (true)
+			{
+				logger.Debug("Files to download:");
+#else
 			if (display_summary_before)
 			{
+#endif
 				AnsiConsole.WriteLine("Files to download:");
 				foreach (FileDownload file_dl in FilesToDownload.OrderBy(fd => fd.LocalPath))
+				{
 					AnsiConsole.MarkupLine($"[deepskyblue1]{Path.GetRelativePath(UserConfig.GamePath, file_dl.LocalPath).EscapeMarkup()}[/] ([{HighlightColor}]{FormatBytes(file_dl.TotalFileSize)}[/])");
+#if DEBUG
+					logger.Debug($"{file_dl.LocalPath}");
+#endif
+				}
 				PromptUserToContinue();
 			}
 
@@ -355,9 +368,9 @@ public static partial class BDSM
 					chunks.Enqueue(chunk);
 			}
 			int download_task_count = (UserConfig.ConnectionInfo.MaxConnections < chunks.Count) ? UserConfig.ConnectionInfo.MaxConnections : chunks.Count;
-			logger.Debug("Chunks to download:");
+			logger.Trace("Chunks to download:");
 			foreach (DownloadChunk chunk in chunks)
-				logger.Debug($"{chunk.FileName} at offset {chunk.Offset}");
+				logger.Trace($"{chunk.FileName} at offset {chunk.Offset}");
 			List<Task> download_tasks = new();
 			List<Task> finished_download_tasks = new();
 			using CancellationTokenSource download_cts = new();

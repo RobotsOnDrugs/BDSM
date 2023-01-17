@@ -4,6 +4,7 @@ using System.Text;
 
 using NLog;
 using FluentFTP;
+using FluentFTP.Exceptions;
 
 using static BDSM.Lib.Exceptions;
 
