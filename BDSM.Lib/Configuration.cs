@@ -76,17 +76,10 @@ public static class Configuration
 	{
 		public readonly record struct Modpacks
 		{
-			public Modpacks ()
-			{
-				Main = true;
-				MEShaders = true;
-				UncensorSelector = true;
-				Exclusive = true;
-			}
-			public bool Main { get; init; }
-			public bool MEShaders { get; init; }
-			public bool UncensorSelector { get; init; }
-			public bool Exclusive { get; init; }
+			public required bool Main { get; init; }
+			public required bool MEShaders { get; init; }
+			public required bool UncensorSelector { get; init; }
+			public required bool Exclusive { get; init; }
 			public required bool StudioMaps { get; init; }
 			public required bool HS2Maps { get; init; }
 			public required bool Studio { get; init; }
@@ -165,7 +158,12 @@ public static class Configuration
 		if (nullable_config.GamePath is null)
 			throw new UserConfigurationException("GamePath is missing from the configuration file.");
 		bool is_hs2 = GamePathIsHS2(nullable_config.GamePath) ?? throw new UserConfigurationException($"{nullable_config.GamePath} is not a valid HS2 or AIS game directory.");
-		config_version = nullable_config.OptionalModpacks?.Main is null ? "0.3" : "0.3.2";
+		bool is_config_03 = nullable_config.OptionalModpacks?.Main is null;
+		config_version = is_config_03 ? "0.3" : "0.3.2";
+		bool main = nullable_config.OptionalModpacks?.Main ?? true;
+		bool mes = nullable_config.OptionalModpacks?.MEShaders ?? true;
+		bool uncensor = nullable_config.OptionalModpacks?.UncensorSelector ?? true;
+		bool exclusive = nullable_config.OptionalModpacks?.Exclusive ?? true;
 		bool studio = nullable_config.OptionalModpacks?.Studio ?? DefaultModpacksSimpleHS2.Studio;
 		logger.Debug("User configuration was verified.");
 		return new()
@@ -173,6 +171,10 @@ public static class Configuration
 			GamePath = nullable_config.GamePath,
 			OptionalModpacks = new()
 			{
+				Main = main,
+				MEShaders = mes,
+				UncensorSelector = uncensor,
+				Exclusive = exclusive,
 				Studio = studio,
 				StudioMaps = nullable_config.OptionalModpacks?.StudioMaps ?? studio,
 				HS2Maps = nullable_config.OptionalModpacks?.HS2Maps ?? is_hs2,

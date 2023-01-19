@@ -138,7 +138,7 @@ internal static class DownloadProgress
 					Debug.Assert(DLStatus.NumberOfFilesToDownload > 0);
 					_ = Interlocked.Decrement(ref DLStatus.NumberOfFilesToDownload);
 					logger.Debug($"Completed download of a file: {Path.GetRelativePath(BDSM.UserConfig.GamePath, filepath)}");
-					logger.Debug($"""{Pluralize(DLStatus.NumberOfFilesToDownload, " file")} remain.""");
+					logger.Debug($"""{Pluralize(DLStatus.NumberOfFilesToDownload, " file")} remaining.""");
 					lock (TotalProgressBar)
 					{
 						file_download_progress.FileProgressBar.Dispose();

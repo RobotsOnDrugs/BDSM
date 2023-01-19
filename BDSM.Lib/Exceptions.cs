@@ -5,9 +5,10 @@ public record Exceptions
 	{
 		const string BugReportSuffix = " Please file a bug report and provide this information. https://github.com/RobotsOnDrugs/BDSM/issues\r\n";
 		internal BDSMInternalFaultException() { }
-		internal BDSMInternalFaultException(string? message) : base(message + BugReportSuffix) { }
+		internal BDSMInternalFaultException(string? message) : this(message, true) { }
 		internal BDSMInternalFaultException(string? message, bool include_bug_report_link) : base(message + (include_bug_report_link ? "" : BugReportSuffix)) { }
-		internal BDSMInternalFaultException(string? message, Exception? innerException) : base(message, innerException) { }
+		internal BDSMInternalFaultException(string? message, Exception? innerException) : this(message, innerException, true) { }
+		internal BDSMInternalFaultException(string? message, Exception? innerException, bool include_bug_report_link) : base(message + (include_bug_report_link ? "" : BugReportSuffix), innerException) { }
 	}
 	public class FTPOperationException : Exception
 	{

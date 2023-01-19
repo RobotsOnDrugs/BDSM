@@ -137,7 +137,7 @@ public static class BetterRepackRepositoryDefinitions
 			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
 			Port = Nice<int>("țȚțȚ"),
 			RootPath = Nice("ȘȪȲȘ"),
-			MaxConnections = Nice<int>("Ȟ"),
+			MaxConnections = Nice<int>("Ȝ"),
 		},
 		new()
 		{
@@ -146,7 +146,7 @@ public static class BetterRepackRepositoryDefinitions
 			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
 			Port = Nice<int>("țȚțȚ"),
 			RootPath = Nice("ȘȪȲȘ"),
-			MaxConnections = Nice<int>("Ȟ"),
+			MaxConnections = Nice<int>("Ȝ"),
 		},
 		new()
 		{
@@ -155,7 +155,7 @@ public static class BetterRepackRepositoryDefinitions
 			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
 			Port = Nice<int>("țȚțȚ"),
 			RootPath = Nice("ȘȪȲȘ"),
-			MaxConnections = Nice<int>("Ȟ"),
+			MaxConnections = Nice<int>("Ȝ"),
 		},
 		new()
 		{
@@ -164,7 +164,7 @@ public static class BetterRepackRepositoryDefinitions
 			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
 			Port = Nice<int>("țȚțȚ"),
 			RootPath = Nice("ȘȪȲȘ"),
-			MaxConnections = Nice<int>("Ȟ"),
+			MaxConnections = Nice<int>("Ȝ"),
 		},
 		new()
 		{
@@ -173,7 +173,7 @@ public static class BetterRepackRepositoryDefinitions
 			Password = Nice("ɜɒɍɎɕɘɊɍɎɛȜ"),
 			Port = Nice<int>("țȚțȚ"),
 			RootPath = Nice("ȘȪȲȘ"),
-			MaxConnections = Nice<int>("Ȟ"),
+			MaxConnections = Nice<int>("Ȝ"),
 		},
 	};
 	static readonly Random RandomRepoIdx = new();
@@ -184,6 +184,9 @@ public static class BetterRepackRepositoryDefinitions
 		EncryptionMode = FtpEncryptionMode.Auto,
 		ValidateAnyCertificate = true,
 		LogToConsole = false,
+		//ConnectTimeout = 1000,
+		//DataConnectionType = FtpDataConnectionType.PASV,
+		//SocketKeepAlive = true
 	};
 	public static ImmutableHashSet<string> GetDesiredModpackNames(bool is_hs2, SimpleUserConfiguration.Modpacks desired_modpacks)
 	{

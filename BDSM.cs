@@ -40,6 +40,14 @@ public static partial class BDSM
 		LogManager.Shutdown();
 		args.Cancel = false; Environment.Exit(1);
 	}
+	static void DeletionCtrlCHandler(object sender, ConsoleCancelEventArgs args)
+	{
+		Console.WriteLine("");
+		LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Update aborted, shutting down.[/]");
+		LogManager.Flush();
+		LogManager.Shutdown();
+		throw new BDSMInternalFaultException("File deletion was aborted, likely due to an error in scanning.");
+	}
 
 	public static async Task<int> Main()
 	{
@@ -206,7 +214,8 @@ public static partial class BDSM
 								break;
 							case TaskStatus.Canceled:
 								all_faulted = false;
-								throw new OperationCanceledException("Scanning was canceled.");
+								LogMarkupText(logger, LogLevel.Fatal, $"[{CancelColor}]Scanning was canceled.[/]");
+								break;
 							default:
 								all_faulted = false;
 								break;
@@ -215,9 +224,9 @@ public static partial class BDSM
 					if (all_faulted)
 						throw new AggregateException(scan_exceptions);
 				}
-				catch (OperationCanceledException oex)
+				catch (OperationCanceledException)
 				{
-					LogMarkupText(logger, LogLevel.Fatal,$"[{CancelColor}]{oex.Message}[/]");
+					LogMarkupText(logger, LogLevel.Fatal, $"[{CancelColor}]Scanning was canceled.[/]");
 					return false;
 				}
 				catch (AggregateException aex)
@@ -251,6 +260,9 @@ public static partial class BDSM
 			return 1;
 		}
 		OpTimer.Stop();
+		bool file_count_is_low = false;
+		if (FilesOnServer.Count < 9001)
+			file_count_is_low = true;
 		LogMarkupText(logger, LogLevel.Info,$"Scanned [{HighlightColor}]{FilesOnServer.Count}[/] files in [{HighlightColor}]{OpTimer.ElapsedMilliseconds}ms[/].");
 
 		LogMarkupText(logger, LogLevel.Info,"Comparing files.");
@@ -297,9 +309,35 @@ public static partial class BDSM
 		{
 			ConcurrentBag<FileInfo> failed_to_delete = new();
 			List<Exception> failed_deletions = new();
-			LogMarkupText(logger, LogLevel.Info,"Will delete files:");
 			foreach (FileInfo pm in FilesToDelete)
-				LogMarkupText(logger, LogLevel.Info,$"[{DeleteColor}]{pm.FullName.EscapeMarkup()}[/]");
+				logger.Info($"{pm.FullName}");
+			LogMarkupText(logger, LogLevel.Info,"Will delete files:");
+			if (FilesToDelete.Count > 100)
+			{
+				Console.CancelKeyPress -= CtrlCHandler!;
+				Console.CancelKeyPress += DeletionCtrlCHandler!;
+				LogMarkupText(logger, LogLevel.Warn, $"[{WarningColor}]There are more than 100 files to delete.[/]");
+				if (file_count_is_low)
+					AnsiConsole.WriteLine("There are many files to delete and few found on the server. This is a sign of a serious error and you should press Ctrl-C now.");
+				else
+					AnsiConsole.WriteLine("This could be due to a large deletion in the bleeding edge pack, but could also be due to an internal error.\n" +
+						"Please check the log now and confirm that this seems to be the case. If not, press Ctrl-C now to exit.");
+				AnsiConsole.WriteLine("Type 'continue anyway' to continue or press Ctrl-C to abort.");
+				while (true)
+				{
+					string? continue_anyway = Console.ReadLine();
+					if (continue_anyway?.Replace("'", null) is "continue anyway")
+					{
+						LogMarkupText(logger, LogLevel.Warn, $"[{WarningColor}]Proceeding with deletion of {FilesToDelete.Count} files.");
+						break;
+					}
+					AnsiConsole.WriteLine("Fully type 'continue anyway' to continue or press Ctrl-C to abort.");
+				}
+				Console.CancelKeyPress -= DeletionCtrlCHandler!;
+				Console.CancelKeyPress += CtrlCHandler!;
+			}
+			foreach (FileInfo pm in FilesToDelete)
+				AnsiConsole.MarkupLine($"[{DeleteColor}]{pm.FullName.EscapeMarkup()}[/]");
 			if (UserConfig.PromptToContinue)
 			{
 				string marked_for_deletion_message = $"[{HighlightColor}]{Pluralize(FilesToDelete.Count, " file")}[/] marked for deletion.";

@@ -6,6 +6,7 @@ using Spectre.Console;
 using static BDSM.Lib.Configuration;
 using static BDSM.Lib.Exceptions;
 using static BDSM.Lib.BetterRepackRepositoryDefinitions;
+using FluentFTP.Exceptions;
 
 namespace BDSM;
 public static partial class BDSM
@@ -65,10 +66,12 @@ public static partial class BDSM
 				case TaskStatus.Faulted:
 					AggregateException taskex = completed_task.Exception!;
 					exceptions.Add(taskex);
+					Exception innerex = taskex.InnerException!;
 					logger.Log(LogLevel.Warn, taskex.Flatten().InnerException, "A task was faulted.");
-					if (taskex.InnerException is not FTPConnectionException)
-						//if (taskex.InnerException is not FTPConnectionException or FTPTaskAbortedException)
-							cts.Cancel();
+					if (innerex is FtpCommandException fcex && fcex.CompletionCode is "421")
+						break;
+					if (innerex is not FTPOperationException)
+						cts.Cancel();
 					break;
 				default:
 					exceptions.Add(new AggregateException(new BDSMInternalFaultException("Internal error while processing task exceptions.")));

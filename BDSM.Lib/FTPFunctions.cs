@@ -12,146 +12,197 @@ namespace BDSM.Lib;
 public static class FTPFunctions
 {
 	private static readonly FTPFunctionOptions Options = new();
-	private static readonly ConcurrentDictionary<int, bool> ScanQueueWaitStatus = new();
+	private static readonly ConcurrentDictionary<int, bool?> ScanQueueWaitStatus = new();
+	private static readonly ConcurrentDictionary<string, int> EmptyDirs = new();
 	public readonly record struct FTPFunctionOptions
 	{
 		public FTPFunctionOptions() { }
 		public int BufferSize { get; init; } = 65536;
 	}
-	private static ILogger logger = LogManager.CreateNullLogger();
+	[System.Diagnostics.CodeAnalysis.SuppressMessage("CodeQuality", "IDE0051:Remove unused private members", Justification = "For in-depth debugging of FTP operations only. Not usually needed.")]
+	private static void LogFTPMessage(FtpTraceLevel trace, string message) => logger.Log(LogLevel.FromOrdinal((int)trace + 1), $"[Managed thread {Environment.CurrentManagedThreadId}] " + "[FluentFTP] " + message);
+	private static ILogger logger = LogManager.GetCurrentClassLogger();
 	public static void InitializeLogger(ILogger parent) => logger = parent;
 	public static FtpClient SetupFTPClient(Configuration.RepoConnectionInfo repoinfo) =>
-		new(repoinfo.Address, repoinfo.Username, repoinfo.Password, repoinfo.Port) { Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig, Encoding = Encoding.UTF8 };
+		new(repoinfo.Address, repoinfo.Username, repoinfo.Password, repoinfo.Port)
+		{
+			Config = BetterRepackRepositoryDefinitions.DefaultRepoConnectionConfig,
+			Encoding = Encoding.UTF8,
+			//LegacyLogger = LogFTPMessage
+		};
 	public static FtpClient DefaultSideloaderClient() => SetupFTPClient(BetterRepackRepositoryDefinitions.DefaultConnectionInfo);
 	public static bool TryConnect(FtpClient client, int max_retries = 3)
 	{
-		bool success = false;
+		int tid = Environment.CurrentManagedThreadId;
 		int retries = 0;
-		while (retries <= max_retries)
+		bool success = false;
+		while (true)
 		{
-			logger.Debug($"TryConnect hit with {retries} retries.");
+			logger.Debug($"[Managed thread {tid}] TryConnect hit with {retries} retries.");
 			try
 			{
 				client.Connect();
 				success = true;
-				logger.Debug("An FTP connection was successful");
+				logger.Debug($"[Managed thread {tid}] An FTP connection was successful");
 				break;
 			}
-			catch (FtpCommandException ex)
+			catch (FtpCommandException fcex) when (fcex.CompletionCode is not "421")
 			{
-				switch (ex.ResponseType)
+				switch (fcex.ResponseType)
 				{
 					case FtpResponseType.TransientNegativeCompletion:
-						Thread.Sleep(1000);
 						retries++;
+						logger.Debug($"[Managed thread {tid}] Failed to establish an FTP connection with a transient error at attempt {retries}.");
+						Thread.Sleep(1000);
 						break;
 					case FtpResponseType.PermanentNegativeCompletion:
+						logger.Warn($"[Managed thread {tid}] Failed to establish an FTP connection with a permanent error: {fcex.Message}");
 						throw;
 					case FtpResponseType.PositivePreliminary or FtpResponseType.PositiveCompletion or FtpResponseType.PositiveIntermediate:
-						logger.Warn("FtpCommandException was thrown with a positive response.");
-						logger.Log(LogLevel.Error, ex);
+						logger.Warn($"[Managed thread {tid}] FtpCommandException was thrown with a positive response.");
+						logger.Log(LogLevel.Error, fcex);
 						Debugger.Break();
 						retries++;
 						break;
-					default:
-						throw;
 				}
+				if (retries > max_retries) { client.Dispose(); throw; }
 			}
+			catch (FtpCommandException fcex) { logger.Warn($"{fcex.Message}"); client.Dispose(); throw; }
+			catch (FtpException fex) { logger.Warn($"[Managed thread {tid}] Failed to establish an FTP connection with an unknown FTP error: {fex.Message}"); client.Dispose(); throw; }
+			catch (TimeoutException)
+			{
+				retries++;
+				if (retries > max_retries)
+					throw;
+				Thread.Sleep(2000);
+			}
+			catch (Exception ex) { logger.Debug($"[Managed thread {tid}] Failed to establish an FTP connection with an unknown error: {ex.Message}"); client.Dispose(); throw; }
 		}
-		if (!success)
-			logger.Debug("Failed to establish an FTP connection.");
 		return success;
 	}
 	public static void GetFilesOnServer(ref ConcurrentBag<PathMapping> paths_to_scan, ref ConcurrentDictionary<string, PathMapping> files_found, Configuration.RepoConnectionInfo repoinfo, CancellationToken ct)
 	{
 		int tid = Environment.CurrentManagedThreadId;
-		ScanQueueWaitStatus[tid] = true;
-		bool should_wait_for_queue = true;
-		if (ct.IsCancellationRequested) return;
-		ConcurrentBag<PathMapping> files = new();
-		PathMapping pathmap = default;
-		List<string> missed_ftp_entries = new();
-		FtpException? last_ftp_exception = null;
-		List<Exception> accumulated_exceptions = new();
-		bool retrying_scan = false;
-		using FtpClient download_client = SetupFTPClient(repoinfo);
-		if (!TryConnect(download_client))
-			throw new FTPConnectionException();
-
-		ScanQueueWaitStatus[tid] = true;
-		while (!ct.IsCancellationRequested)
+		try
 		{
 			ScanQueueWaitStatus[tid] = false;
-			if (accumulated_exceptions.Count > 2)
+			bool should_wait_for_queue = false;
+			try { ct.ThrowIfCancellationRequested(); }
+			catch (Exception) { ScanQueueWaitStatus[tid] = null; throw; }
+			ConcurrentBag<PathMapping> files = new();
+			PathMapping pathmap = default;
+			List<string> missed_ftp_entries = new();
+			FtpException? last_ftp_exception = null;
+			List<Exception> accumulated_exceptions = new();
+			using FtpClient download_client = SetupFTPClient(repoinfo);
+			ScanQueueWaitStatus[tid] = null;
+			if (!TryConnect(download_client))
+				throw new FTPConnectionException();
+
+			while (!ct.IsCancellationRequested)
 			{
-				download_client.Dispose();
-				throw new AggregateException(accumulated_exceptions);
-			}
-			if (!retrying_scan)
-			{
+				ScanQueueWaitStatus[tid] = false;
+				if (accumulated_exceptions.Count > 2)
+				{
+					ScanQueueWaitStatus[tid] = null;
+					download_client.Dispose();
+					throw new AggregateException(accumulated_exceptions);
+				}
+
+				try { ct.ThrowIfCancellationRequested(); }
+				catch (Exception) { ScanQueueWaitStatus[tid] = null; throw; }
 				if (!paths_to_scan.TryTake(out pathmap))
 				{
 					ScanQueueWaitStatus[tid] = true;
-					should_wait_for_queue = ScanQueueWaitStatus.Values.Count(waiting => waiting) != ScanQueueWaitStatus.Count;
+					Thread.Sleep(500);
+					should_wait_for_queue = ScanQueueWaitStatus.Values.Count(waiting => waiting ?? true) < ScanQueueWaitStatus.Count;
 					if (should_wait_for_queue)
 						continue;
 					break;
 				}
-				retrying_scan = false;
-			}
-			ScanQueueWaitStatus[tid] = false;
-			string remotepath = pathmap.RemoteFullPath;
-			string localpath = pathmap.LocalFullPath;
-			PathMapping _pathmap;
-			FtpListItem[] scanned_files;
-			int scan_attempts = 0;
-			ct.ThrowIfCancellationRequested();
-			try
-			{
-				scanned_files = download_client.GetListing(remotepath);
-				retrying_scan = false;
-			}
-			catch (Exception ex) when (ex is FtpCommandException or IOException)
-			{
-				scan_attempts++;
-				Thread.Sleep(500);
-				if (scan_attempts == 3)
+
+				try { ct.ThrowIfCancellationRequested(); }
+				catch (Exception) { ScanQueueWaitStatus[tid] = null; throw; }
+				string remotepath = pathmap.RemoteFullPath;
+				string localpath = pathmap.LocalFullPath;
+				PathMapping _pathmap;
+				FtpListItem[] scanned_files;
+				int scan_attempts = 0;
+				int timeouts = 0;
+
+				try { ct.ThrowIfCancellationRequested(); }
+				catch (Exception) { ScanQueueWaitStatus[tid] = null; throw; }
+				try { scanned_files = download_client.GetListing(remotepath); }
+				catch (Exception ex) when (ex is FtpCommandException or IOException or System.Net.Sockets.SocketException)
 				{
 					paths_to_scan.Add(pathmap);
-					download_client.Dispose();
-					throw;
+					scan_attempts++;
+					Thread.Sleep(100);
+					if (scan_attempts == 3)
+					{
+						download_client.Dispose();
+						ScanQueueWaitStatus[tid] = null;
+						throw;
+					}
+					continue;
 				}
-				continue;
-			}
-			catch (FtpException ex) when (ex.Message != last_ftp_exception?.Message)
-			{
-				accumulated_exceptions.Add(ex);
-				continue;
-			}
-			accumulated_exceptions.Clear();
-			retrying_scan = false;
-			scan_attempts = 0;
-			if (scanned_files is null)
-			{
-				paths_to_scan.Add(pathmap);
-				continue;
-			}
-			foreach (FtpListItem item in scanned_files)
-				switch (item.Type)
+				catch (FtpException fex) when (fex.Message != last_ftp_exception?.Message)
 				{
-					case FtpObjectType.File:
-						_pathmap = pathmap with { LocalRelativePath = string.Join('\\', pathmap.LocalRelativePath, item.Name), RemoteRelativePath = string.Join('/', pathmap.RemoteRelativePath, item.Name), FileSize = item.Size };
-						_ = files_found.TryAdd(_pathmap.LocalFullPathLower, _pathmap);
-						break;
-					case FtpObjectType.Directory:
-						_pathmap = pathmap with { LocalRelativePath = string.Join('\\', pathmap.LocalRelativePath, item.Name), RemoteRelativePath = string.Join('/', pathmap.RemoteRelativePath, item.Name) };
-						paths_to_scan.Add(_pathmap);
-						break;
-					case FtpObjectType.Link:
-						break;
+					accumulated_exceptions.Add(fex);
+					paths_to_scan.Add(pathmap);
+					continue;
 				}
+				catch (TimeoutException)
+				{
+					paths_to_scan.Add(pathmap);
+					timeouts++;
+					Thread.Sleep(100);
+					if (timeouts == 5)
+					{
+						download_client.Dispose();
+						ScanQueueWaitStatus[tid] = null;
+						throw;
+					}
+					continue;
+				}
+				if (scanned_files.Length == 0)
+				{
+					string empty_dir = pathmap.RemoteFullPath;
+					EmptyDirs[empty_dir] = EmptyDirs.TryGetValue(empty_dir, out int retries) ? retries + 1 : 1;
+					if (EmptyDirs[empty_dir] > 2)
+						_ = EmptyDirs.TryRemove(empty_dir, out _);
+					else
+						paths_to_scan.Add(pathmap);
+					continue;
+				}
+
+				if (EmptyDirs.TryGetValue(pathmap.RemoteFullPath, out int _))
+					Debugger.Break();
+				accumulated_exceptions.Clear();
+				scan_attempts = 0;
+				if (scanned_files is null)
+					throw new FTPOperationException($"Tried to get a listing for {pathmap.RemoteFullPath} but apparently it doesn't exist.");
+				foreach (FtpListItem item in scanned_files)
+					switch (item.Type)
+					{
+						case FtpObjectType.File:
+							_pathmap = pathmap with { LocalRelativePath = string.Join('\\', pathmap.LocalRelativePath, item.Name), RemoteRelativePath = string.Join('/', pathmap.RemoteRelativePath, item.Name), FileSize = item.Size };
+							_ = files_found.TryAdd(_pathmap.LocalFullPathLower, _pathmap);
+							break;
+						case FtpObjectType.Directory:
+							_pathmap = pathmap with { LocalRelativePath = string.Join('\\', pathmap.LocalRelativePath, item.Name), RemoteRelativePath = string.Join('/', pathmap.RemoteRelativePath, item.Name) };
+							paths_to_scan.Add(_pathmap);
+							break;
+						case FtpObjectType.Link:
+							break;
+					}
+			}
+			ScanQueueWaitStatus[tid] = null;
+			download_client.Dispose();
+			try { ct.ThrowIfCancellationRequested(); }
+			catch (Exception) { throw; }
 		}
-		download_client.Dispose();
+		catch (Exception) { throw; }
 	}
 
 	[Obsolete("This should no longer be needed with the new simplified configuration and is likely to be removed in a future release.")]
