@@ -46,7 +46,7 @@ public static partial class BDSM
 	private static void RaiseInternalFault(ILogger logger, string message)
 	{
 		BDSMInternalFaultException int_ex = new(message);
-		LoggingConfiguration.LogException(logger, int_ex);
+		LoggingConfiguration.LogExceptionAndDisplay(logger, int_ex);
 		throw int_ex;
 	}
 #endif
