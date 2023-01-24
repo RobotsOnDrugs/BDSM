@@ -23,11 +23,11 @@ public readonly record struct DownloadChunk
 public readonly record struct ChunkDownloadProgressInformation
 {
 	public required long BytesDownloaded { get; init; }
-	public string BytesTransferredString => Utility.FormatBytes(BytesDownloaded);
+	public string BytesTransferredString => BytesDownloaded.FormatBytes();
 	public required TimeSpan TimeElapsed { get; init; }
 	public required long TotalChunkSize { get; init; }
 	public double CurrentSpeed => BytesDownloaded / TimeElapsed.TotalSeconds;
-	public string CurrentSpeedString => Utility.FormatBytes(Math.Round(CurrentSpeed, 2)) + "/s";
+	public string CurrentSpeedString => Math.Round(CurrentSpeed, 2).FormatBytes() + "/s";
 }
 public enum DownloadStatus
 {

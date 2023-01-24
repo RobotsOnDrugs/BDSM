@@ -59,21 +59,22 @@ public static class FTPFunctions
 						logger.Warn($"[Managed thread {tid}] Failed to establish an FTP connection with a permanent error: {fcex.Message}");
 						throw;
 					case FtpResponseType.PositivePreliminary or FtpResponseType.PositiveCompletion or FtpResponseType.PositiveIntermediate:
-						logger.Warn($"[Managed thread {tid}] FtpCommandException was thrown with a positive response.");
-						logger.Log(LogLevel.Error, fcex);
-						Debugger.Break();
-						retries++;
-						break;
+						logger.Error(fcex, $"[Managed thread {tid}] FtpCommandException was thrown with a positive response.");
+						throw new BDSMInternalFaultException("Don't know how to handle FtpCommandException with a positive response.", fcex);
 				}
 				if (retries > max_retries) { client.Dispose(); throw; }
 			}
 			catch (FtpCommandException fcex) { logger.Warn($"{fcex.Message}"); client.Dispose(); throw; }
 			catch (FtpException fex) { logger.Warn($"[Managed thread {tid}] Failed to establish an FTP connection with an unknown FTP error: {fex.Message}"); client.Dispose(); throw; }
-			catch (TimeoutException)
+			catch (Exception tex) when (tex is TimeoutException or IOException)
 			{
 				retries++;
 				if (retries > max_retries)
-					throw;
+				{
+					string error_message = $"[Managed thread {tid}] " + (tex is TimeoutException ? "FTP connection attempt timed out." : "FTP connection had an I/O error.");
+					logger.Error(tex, error_message);
+					throw new FTPOperationException(error_message, tex);
+				}
 				Thread.Sleep(2000);
 			}
 			catch (Exception ex) { logger.Debug($"[Managed thread {tid}] Failed to establish an FTP connection with an unknown error: {ex.Message}"); client.Dispose(); throw; }
@@ -177,7 +178,7 @@ public static class FTPFunctions
 				}
 
 				if (EmptyDirs.TryGetValue(pathmap.RemoteFullPath, out int _))
-					Debugger.Break();
+					logger.Warn($"[Managed thread {tid}] Recovered from a faulty directory listing.");
 				accumulated_exceptions.Clear();
 				scan_attempts = 0;
 				if (scanned_files is null)
@@ -259,12 +260,12 @@ public static class FTPFunctions
 			{
 				try { ftp_filestream = client.OpenRead(chunk.RemotePath, FtpDataType.Binary, chunk.Offset, chunk.Offset + chunk.Length); break; }
 				catch (Exception) when (connection_retries <= 2) { connection_retries++; }
-				catch (Exception)
+				catch (Exception ex)
 				{
 					Cleanup();
-					logger.Debug($"[Managed thread {tid}] A chunk was requeued because of failed FTP download connection: {chunk.FileName} at {chunk.Offset}");
+					logger.Debug(ex, $"[Managed thread {tid}] A chunk was requeued because of a failed FTP download connection: {chunk.FileName} at {chunk.Offset}");
 					chunks.Enqueue(chunk);
-					throw;
+					throw new FTPOperationException($"The FTP data stream could not be read for {chunk.FileName} at {chunk.Offset}", ex);
 				}
 			}
 			local_filestream.Lock(chunk.Offset, chunk.Length);
@@ -338,8 +339,6 @@ public static class FTPFunctions
 				reportprogress((ChunkDownloadProgressInformation)progressinfo!, chunk.LocalPath);
 				is_reported_or_just_starting = true;
 			}
-			if (!is_reported_or_just_starting)
-				Debugger.Break();
 			logger.Debug($"""[Managed thread {tid}] Exiting chunk processing loop{(canceled ? " (canceled)" : "")}: {chunk.FileName} at {chunk.Offset}""");
 		}
 		try { local_filestream?.Unlock(chunk.Offset, chunk.Length); }

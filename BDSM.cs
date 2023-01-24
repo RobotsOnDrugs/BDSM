@@ -23,7 +23,7 @@ namespace BDSM;
 
 public static partial class BDSM
 {
-	public const string VERSION = "0.3.8";
+	public const string VERSION = "0.3.9";
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleOutputCP(uint wCodePageID);
@@ -35,7 +35,7 @@ public static partial class BDSM
 	static void CtrlCHandler(object sender, ConsoleCancelEventArgs args)
 	{
 		Console.WriteLine("");
-		LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Update aborted, shutting down.[/]");
+		LogWithMarkup(logger, LogLevel.Fatal, "Update aborted, shutting down.");
 		LogManager.Flush();
 		LogManager.Shutdown();
 		args.Cancel = false; Environment.Exit(1);
@@ -43,7 +43,7 @@ public static partial class BDSM
 	static void DeletionCtrlCHandler(object sender, ConsoleCancelEventArgs args)
 	{
 		Console.WriteLine("");
-		LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Update aborted, shutting down.[/]");
+		LogWithMarkup(logger, LogLevel.Fatal, "Update aborted, shutting down.");
 		LogManager.Flush();
 		LogManager.Shutdown();
 		throw new BDSMInternalFaultException("File deletion was aborted, likely due to an error in scanning.");
@@ -64,7 +64,7 @@ public static partial class BDSM
 		logger.Info("Logger initialized.");
 
 		if (is_custom_logger)
-			LogMarkupText(logger, LogLevel.Info, $"Custom logging configuration loaded [{SuccessColor}]successfully[/].");
+			LogWithMarkup(logger, LogLevel.Info, "Custom logging configuration loaded successfully.", SuccessColor);
 		InitalizeLibraryLoggers(logger);
 		FTPFunctionOptions FTPOptions = new() { BufferSize = 65536 };
 
@@ -81,14 +81,14 @@ public static partial class BDSM
 						try { UserConfig = GenerateNewUserConfig(); break; }
 						catch (OperationCanceledException) { }
 					}
-					LogMarkupText(logger, LogLevel.Fatal, $"[{CancelColor}]No configuration file was found and the creation of a new one was canceled.[/]");
+					LogWithMarkup(logger, LogLevel.Fatal, "No configuration file was found and the creation of a new one was canceled.");
 					return 1;
 				case TypeInitializationException or YamlException:
 					UserConfig = await GetOldUserConfigurationAsync();
 					user_config_version = "0.1";
 					break;
 				case null:
-					LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]{ex.Message.EscapeMarkup()}[/]");
+					LogWithMarkup(logger, LogLevel.Fatal, ex.Message.EscapeMarkup());
 					PromptBeforeExit();
 					return 1;
 				default:
@@ -98,7 +98,7 @@ public static partial class BDSM
 
 		if (GamePathIsHS2(UserConfig.GamePath) is null)
 		{
-			LogMarkupText(logger, LogLevel.Error, $"[{ErrorColor}]Your game path {UserConfig.GamePath.EscapeMarkup()} is not valid.[/]");
+			LogWithMarkup(logger, LogLevel.Error, $"Your game path {UserConfig.GamePath.EscapeMarkup()} is not valid.");
 			return 1;
 		}
 
@@ -107,15 +107,15 @@ public static partial class BDSM
 			try
 			{
 				SerializeUserConfiguration(FullUserConfigurationToSimple(UserConfig));
-				LogMarkupText(logger, LogLevel.Info, $"[{FileListingColor}]Configuration file was updated from {user_config_version} to the {CurrentConfigVersion} format.[/]");
+				LogWithMarkup(logger, LogLevel.Info, $"Configuration file was updated from {user_config_version} to the {CurrentConfigVersion} format.", SuccessColor);
 			}
 			catch (Exception serial_ex)
 			{
 				logger.Warn(serial_ex);
-				AnsiConsole.MarkupLine($"[{CancelColor}]Your configuration was updated, but the new configuration file could not be written. See BDSM.log for details.[/]");
+				AnsiConsole.MarkupLine("Your configuration was updated, but the new configuration file could not be written. See BDSM.log for details.".Colorize(CancelColor));
 				PromptUserToContinue();
 			}
-			AnsiConsole.MarkupLine($"[{FileListingColor}]See [link]https://github.com/RobotsOnDrugs/BDSM/wiki/User-Configuration[/] for more details on the new format.[/]");
+			AnsiConsole.MarkupLine("See [link]https://github.com/RobotsOnDrugs/BDSM/wiki/User-Configuration[/] for more details on the new format.");
 		}
 		switch (user_config_version)
 		{
@@ -124,12 +124,12 @@ public static partial class BDSM
 			case "0.3":
 				SimpleUserConfiguration simple_config = FullUserConfigurationToSimple(UserConfig);
 				string studio_mod_download_state = simple_config.OptionalModpacks.Studio ? "both packs" : "neither pack";
-				LogMarkupText(logger, LogLevel.Warn, $"[{CancelColor}]Notice: Downloading extra studio maps was turned on by default in 0.3, but is now turned on by default only if studio mods are also being downloaded.[/]");
-				LogMarkupText(logger, LogLevel.Warn, $"[{CancelColor}]With your configuration, {studio_mod_download_state} will be downloaded. If you wish to change this, you may exit now and edit UserConfiguration.yaml to your liking.[/]");
+				LogWithMarkup(logger, LogLevel.Warn, "Notice: Downloading extra studio maps was turned on by default in 0.3, but is now turned on by default only if studio mods are also being downloaded.");
+				LogWithMarkup(logger, LogLevel.Warn, "With your configuration, {studio_mod_download_state} will be downloaded. If you wish to change this, you may exit now and edit UserConfiguration.yaml to your liking.");
 				PromptUserToContinue();
 				break;
 			case "0.1":
-				LogMarkupText(logger, LogLevel.Warn, $"[{CancelColor}]Notice: As of 0.3, server connection info and server path mappings and sync behavior are no longer in the user configuration. If you have a good use case for customizing these, file a feature request on GitHub.[/]");
+				LogWithMarkup(logger, LogLevel.Warn, "Notice: As of 0.3, server connection info and server path mappings and sync behavior are no longer in the user configuration. If you have a good use case for customizing these, file a feature request on GitHub.");
 				break;
 			default:
 				throw new BDSMInternalFaultException("Detection of user configuration version failed.");
@@ -153,31 +153,30 @@ public static partial class BDSM
 			logger.Info("SkipScan is enabled.");
 			using FtpClient _scanner = SetupFTPClient(UserConfig.ConnectionInfo);
 			_scanner.Connect();
-			foreach (PathMapping pathmap in GetPathMappingsFromSkipScanConfig(_skip_config, UserConfig))
+			ConcurrentBag<PathMapping> skipscan_pm = GetPathMappingsFromSkipScanConfig(_skip_config, UserConfig);
+			foreach (PathMapping pathmap in skipscan_pm)
 			{
 				FtpListItem? _dl_file_info = _scanner.GetObjectInfo(pathmap.RemoteFullPath);
 				if (_dl_file_info is not null)
 					FilesToDownload.Add(PathMappingToFileDownload(pathmap with { FileSize = _dl_file_info.Size }));
 				else
-					LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Couldn't get file info for {pathmap.RemoteFullPath.EscapeMarkup()}.[/]");
+					LogWithMarkup(logger, LogLevel.Fatal, $"Couldn't get file info for {pathmap.RemoteFullPath.EscapeMarkup()}.");
 			}
 			_scanner.Dispose();
 		}
 #endif
-		if (SkipScan)
-			BaseDirectoriesToScan = ImmutableHashSet<PathMapping>.Empty;
-		else
+		try
 		{
-			try { BaseDirectoriesToScan = UserConfig.BasePathMappings; }
-			catch (FormatException)
-			{
-				LogMarkupText(logger, LogLevel.Error, "Your configuration file is malformed. Please reference the example and read the documentation.");
-				PromptBeforeExit();
-				return 1;
-			}
-			foreach (PathMapping mapping in BaseDirectoriesToScan)
-				DirectoriesToScan.Add(mapping);
+			BaseDirectoriesToScan = SkipScan ? ImmutableHashSet<PathMapping>.Empty : UserConfig.BasePathMappings;
 		}
+		catch (FormatException)
+		{
+			LogWithMarkup(logger, LogLevel.Error, "Your configuration file is malformed. Please reference the example and read the documentation.");
+			PromptBeforeExit();
+			return 1;
+		}
+		foreach (PathMapping mapping in BaseDirectoriesToScan)
+			DirectoriesToScan.Add(mapping);
 
 		logger.Debug($"Using {UserConfig.ConnectionInfo.Address}");
 		Stopwatch OpTimer = new();
@@ -214,7 +213,7 @@ public static partial class BDSM
 								break;
 							case TaskStatus.Canceled:
 								all_faulted = false;
-								LogMarkupText(logger, LogLevel.Fatal, $"[{CancelColor}]Scanning was canceled.[/]");
+								LogWithMarkup(logger, LogLevel.Fatal, "Scanning was canceled.", CancelColor);
 								break;
 							default:
 								all_faulted = false;
@@ -226,20 +225,20 @@ public static partial class BDSM
 				}
 				catch (OperationCanceledException)
 				{
-					LogMarkupText(logger, LogLevel.Fatal, $"[{CancelColor}]Scanning was canceled.[/]");
+					LogWithMarkup(logger, LogLevel.Fatal, "Scanning was canceled.", CancelColor);
 					return false;
 				}
 				catch (AggregateException aex)
 				{
 					if (all_faulted || none_successful)
 					{
-						LogMarkupText(logger, LogLevel.Fatal, $"[{ErrorColor}]Could not scan the server. Failed scan tasks had the following errors:[/]");
+						LogWithMarkup(logger, LogLevel.Fatal, "Could not scan the server. Failed scan tasks had the following errors:");
 						foreach (Exception inner_ex in aex.Flatten().InnerExceptions)
 						{
-							AnsiConsole.MarkupLine($"[{ErrorColorAlt}]{inner_ex.Message}[/]");
+							AnsiConsole.MarkupLine(inner_ex.Message.Colorize(ErrorColorAlt));
 							logger.Warn(inner_ex);
 						}
-						AnsiConsole.MarkupLine($"[{ErrorColor}]See the log for full error details.[/]");
+						AnsiConsole.MarkupLine("See the log for full error details.".Colorize(ErrorColor));
 						return false;
 					}
 				}
@@ -254,7 +253,7 @@ public static partial class BDSM
 		Console.CancelKeyPress += CtrlCHandler!;
 		if (none_successful || (FilesOnServer.IsEmpty && !DirectoriesToScan.IsEmpty))
 		{
-			LogMarkupText(logger, LogLevel.Error,$"[{ErrorColor}]Scanning could not complete due to network or other errors.[/]");
+			LogWithMarkup(logger, LogLevel.Error, "Scanning could not complete due to network or other errors.");
 			if (UserConfig.PromptToContinue)
 				PromptBeforeExit();
 			return 1;
@@ -263,9 +262,10 @@ public static partial class BDSM
 		bool file_count_is_low = false;
 		if (FilesOnServer.Count < 9001)
 			file_count_is_low = true;
-		LogMarkupText(logger, LogLevel.Info,$"Scanned [{HighlightColor}]{FilesOnServer.Count}[/] files in [{HighlightColor}]{OpTimer.ElapsedMilliseconds}ms[/].");
+		LogMarkupText(logger, LogLevel.Info, $"Scanned {FilesOnServer.Count.Pluralize("file").Colorize(HighlightColor)} in {(OpTimer.ElapsedMilliseconds.ToString() + "ms").Colorize(HighlightColor)}.");
 
-		LogMarkupText(logger, LogLevel.Info,"Comparing files.");
+		const string comparing_files_message = "Comparing files.";
+		LogWithMarkup(logger, LogLevel.Info, comparing_files_message, newline: false);
 		OpTimer.Restart();
 		bool local_access_successful = true;
 		ConcurrentQueue<Exception> local_access_exceptions = new();
@@ -293,7 +293,8 @@ public static partial class BDSM
 			catch (Exception ex)
 			{
 				local_access_successful = false;
-				LogMarkupText(logger, LogLevel.Error,$"[{ErrorColor}][{ErrorColorAlt}]Could not access {pm.LocalFullPath.EscapeMarkup()}[/]. Ensure that you have the correct path specified in your configuration and that you have permission to access it.[/]");
+				LogMarkupText(logger, LogLevel.Error, $"Could not access {pm.LocalFullPath.EscapeMarkup().Colorize(ErrorColorAlt)}. " +
+					"Ensure that you have the correct path specified in your configuration and that you have permission to access it.".Colorize(ErrorColor));
 				local_access_exceptions.Enqueue(ex);
 				continue;
 			}
@@ -303,20 +304,32 @@ public static partial class BDSM
 		foreach (KeyValuePair<string, PathMapping> pm_kvp in FilesOnServer)
 			FilesToDownload.Add(PathMappingToFileDownload(pm_kvp.Value));
 		OpTimer.Stop();
-		LogMarkupText(logger, LogLevel.Info,$"Comparison took [{HighlightColor}]{OpTimer.ElapsedMilliseconds}ms[/].");
-		LogMarkupText(logger, LogLevel.Info,$"[{HighlightColor}]{Pluralize(FilesToDownload.Count, " file")}[/] to download and [{HighlightColor}]{Pluralize(FilesToDelete.Count, " file")}[/] to delete.");
+		Console.Write(new string(' ', comparing_files_message.Length) + '\r');
+		LogMarkupText(logger, LogLevel.Info, $"Comparison took {(OpTimer.ElapsedMilliseconds + "ms").Colorize(HighlightColor)}.");
+
+		DLStatus.TotalNumberOfFilesToDownload = FilesToDownload.Count;
+		DLStatus.NumberOfFilesToDownload = FilesToDownload.Count;
+		DLStatus.TotalBytesToDownload = FilesToDownload.Select(file_dl => file_dl.TotalFileSize).Sum();
+		DLStatus.TotalNumberOfFilesToDownload = FilesToDownload.Count;
+		DLStatus.NumberOfFilesToDownload = FilesToDownload.Count;
+		if (!FilesToDownload.IsEmpty || !FilesToDelete.IsEmpty)
+		{
+			string download_count_summary = FilesToDownload.IsEmpty ? string.Empty : $"{FilesToDownload.Count.Pluralize("file").Colorize(HighlightColor)} to download ({DLStatus.TotalBytesToDownloadString.Colorize(HighlightColor)})";
+			string deletion_count_summary = FilesToDelete.IsEmpty ? string.Empty : $"{FilesToDelete.Count.Pluralize("file").Colorize(HighlightColor)} to delete";
+			string connector = FilesToDownload.IsEmpty || FilesToDelete.IsEmpty ? string.Empty : " and ";
+			LogMarkupText(logger, LogLevel.Info, download_count_summary + connector + deletion_count_summary + ".");
+		}
+		else
+			LogWithMarkup(logger, LogLevel.Info, "No files to download or delete.");
 		if (!FilesToDelete.IsEmpty)
 		{
 			ConcurrentBag<FileInfo> failed_to_delete = new();
 			List<Exception> failed_deletions = new();
-			foreach (FileInfo pm in FilesToDelete)
-				logger.Info($"{pm.FullName}");
-			LogMarkupText(logger, LogLevel.Info,"Will delete files:");
 			if (FilesToDelete.Count > 100)
 			{
 				Console.CancelKeyPress -= CtrlCHandler!;
 				Console.CancelKeyPress += DeletionCtrlCHandler!;
-				LogMarkupText(logger, LogLevel.Warn, $"[{WarningColor}]There are more than 100 files to delete.[/]");
+				LogWithMarkup(logger, LogLevel.Warn, "There are more than 100 files to delete.");
 				if (file_count_is_low)
 					AnsiConsole.WriteLine("There are many files to delete and few found on the server. This is a sign of a serious error and you should press Ctrl-C now.");
 				else
@@ -328,7 +341,7 @@ public static partial class BDSM
 					string? continue_anyway = Console.ReadLine();
 					if (continue_anyway?.Replace("'", null) is "continue anyway")
 					{
-						LogMarkupText(logger, LogLevel.Warn, $"[{WarningColor}]Proceeding with deletion of {FilesToDelete.Count} files.");
+						LogMarkupText(logger, LogLevel.Warn, $"Proceeding with deletion of {FilesToDelete.Count.Colorize(HighlightColor)} files.".Colorize(WarningColor));
 						break;
 					}
 					AnsiConsole.WriteLine("Fully type 'continue anyway' to continue or press Ctrl-C to abort.");
@@ -336,65 +349,73 @@ public static partial class BDSM
 				Console.CancelKeyPress -= DeletionCtrlCHandler!;
 				Console.CancelKeyPress += CtrlCHandler!;
 			}
-			foreach (FileInfo pm in FilesToDelete)
-				AnsiConsole.MarkupLine($"[{DeleteColor}]{pm.FullName.EscapeMarkup()}[/]");
-			if (UserConfig.PromptToContinue)
+			if (UserConfig.PromptToContinue && AnsiConsole.Confirm("Show full list of files to delete?", true))
 			{
-				string marked_for_deletion_message = $"[{HighlightColor}]{Pluralize(FilesToDelete.Count, " file")}[/] marked for deletion.";
-				LogMarkupText(logger, LogLevel.Info,marked_for_deletion_message);
-				PromptUserToContinue();
-				Console.Write('\r' + new string(' ', marked_for_deletion_message.Length) + '\r');
+				AnsiConsole.MarkupLine("Will delete files:");
+				foreach (FileInfo pm in FilesToDelete)
+					AnsiConsole.MarkupLine(Path.GetRelativePath(UserConfig.GamePath, pm.FullName).EscapeMarkup().Colorize(DeleteColor));
 			}
+			logger.Info($"{FilesToDelete.Count.Pluralize("file")} marked for deletion.");
 			foreach (FileInfo pm in FilesToDelete)
 			{
-				try { File.Delete(pm.FullName); }
+				try
+				{
+					File.Delete(pm.FullName);
+					logger.Info($"Deleted {pm.FullName}.");
+				}
 				catch (Exception ex)
 				{
 					failed_to_delete.Add(pm);
 					failed_deletions.Add(ex);
-					LogMarkupText(logger, LogLevel.Warn,$"[{WarningColor}]{ex.Message.EscapeMarkup()}[/]");
+					AnsiConsole.WriteLine(ex.Message.EscapeMarkup().Colorize(WarningColor));
 				}
 			}
-			LogMarkupText(logger, LogLevel.Info,$"[{HighlightColor}]{Pluralize(FilesToDelete.Count - failed_to_delete.Count, " file")}[/] deleted.");
+			LogMarkupText(logger, LogLevel.Info, $"{(FilesToDelete.Count - failed_to_delete.Count).Pluralize("file").Colorize(HighlightColor)} deleted.");
 			Debug.Assert(failed_deletions.Count == failed_to_delete.Count);
 			if (failed_deletions.Count > 0)
 			{
-				LogMarkupText(logger, LogLevel.Error,$"[{ErrorColorAlt}]{Pluralize(failed_to_delete.Count, " file")}[/][{ErrorColor}] could not be deleted.[/]");
+				LogMarkupText(logger, LogLevel.Error, $"{failed_to_delete.Count.Pluralize("file").Colorize(ErrorColorAlt)} could not be deleted.".Colorize(ErrorColor));
+				foreach (Exception ex in failed_deletions)
+					logger.Warn(ex);
 				throw new AggregateException(failed_deletions);
 			}
 		}
 
 		if (!FilesToDownload.IsEmpty)
 		{
-			DLStatus.TotalNumberOfFilesToDownload = FilesToDownload.Count;
-			DLStatus.NumberOfFilesToDownload = FilesToDownload.Count;
-			DLStatus.TotalBytesToDownload = FilesToDownload.Select(file_dl => file_dl.TotalFileSize).Sum();
-			DLStatus.TotalNumberOfFilesToDownload = FilesToDownload.Count;
-			DLStatus.NumberOfFilesToDownload = FilesToDownload.Count;
-			LogMarkupText(logger, LogLevel.Info, $"[{HighlightColor}]{Pluralize(DLStatus.NumberOfFilesToDownload, " file")}[/] ([{HighlightColor}]{FormatBytes(DLStatus.TotalBytesToDownload)}[/]) to download.");
+			Dictionary<string, (int TotalFiles, long TotalBytes)> pack_totals = new();
+			foreach (PathMapping pack_dir in BaseDirectoriesToScan)
+				pack_totals[pack_dir.FileName] = (0, 0L);
+			if (SkipScan) pack_totals["Sideloader Modpack"] = (0, 0L);
 
-			bool display_summary_before = UserConfig.PromptToContinue && AnsiConsole.Confirm("Show summary?", true);
-#if DEBUG
-			if (true)
+			foreach (FileDownload file_to_dl in FilesToDownload)
 			{
-				logger.Debug("Files to download:");
-#else
-			if (display_summary_before)
+				string base_name = Path.GetRelativePath(UserConfig.GamePath, file_to_dl.LocalPath).RelativeModPathToPackName();
+				int new_file_count = pack_totals[base_name].TotalFiles + 1;
+				long new_byte_count = pack_totals[base_name].TotalBytes + file_to_dl.TotalFileSize;
+				pack_totals[base_name] = (new_file_count, new_byte_count);
+			}
+			foreach (string pack_name in pack_totals.Keys.OrderBy(name => name))
 			{
-#endif
-				AnsiConsole.WriteLine("Files to download:");
+				int filecount = pack_totals[pack_name].TotalFiles;
+				if (filecount == 0)
+					continue;
+				long bytecount = pack_totals[pack_name].TotalBytes;
+				AnsiConsole.MarkupLine($"- {pack_name.Colorize(ModpackNameColor)}: " +
+					$"{filecount.Pluralize("file").Colorize(HighlightColor)} " +
+					$"({bytecount.FormatBytes().Colorize(HighlightColor)})");
+			}
+			if (UserConfig.PromptToContinue && AnsiConsole.Confirm("Show full list of files to download?", true))
+			{
 				foreach (FileDownload file_dl in FilesToDownload.OrderBy(fd => fd.LocalPath))
 				{
-					AnsiConsole.MarkupLine($"[deepskyblue1]{Path.GetRelativePath(UserConfig.GamePath, file_dl.LocalPath).EscapeMarkup()}[/] ([{HighlightColor}]{FormatBytes(file_dl.TotalFileSize)}[/])");
-#if DEBUG
+					AnsiConsole.MarkupLine($"{Path.GetRelativePath(UserConfig.GamePath, file_dl.LocalPath).EscapeMarkup().Colorize(FileListingColor)} ({file_dl.TotalFileSize.FormatBytes().Colorize(HighlightColor)})");
 					logger.Debug($"{file_dl.LocalPath}");
-#endif
 				}
 				PromptUserToContinue();
 			}
 
 			OpTimer.Restart();
-			HashSet<FileDownloadProgressInformation> failed_files = new();
 			DLStatus.TrackTotalCurrentSpeed();
 			TotalProgressBar = new((int)(DLStatus.TotalBytesToDownload / 1024), "Downloading files:", DefaultTotalProgressBarOptions);
 			ConcurrentQueue<DownloadChunk> chunks = new();
@@ -429,6 +450,7 @@ public static partial class BDSM
 			DLStatus.DownloadSpeedStopwatch.Stop();
 			logger.Debug($"Chunks left after processing: {chunks.Count}");
 			Console.CancelKeyPress += CtrlCHandler!;
+
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> progress_info_kvp in DLStatus.FileDownloadsInformation)
 			{
 				FileDownloadProgressInformation progress_info = progress_info_kvp.Value;
@@ -438,8 +460,8 @@ public static partial class BDSM
 					try { File.Delete(progress_info.FilePath); }
 					catch (Exception ex)
 					{
-						LogMarkupText(logger, LogLevel.Error, $"[red3]Tried to delete incomplete file [red1]{progress_info.FilePath.EscapeMarkup()}[/] during cleanup but encountered an error:[/]");
-						LogException(logger, ex);
+						LogMarkupText(logger, LogLevel.Error, $"Tried to delete incomplete file {progress_info.FilePath.EscapeMarkup().Colorize(ErrorColor)} during cleanup but encountered an error:".Colorize(ErrorColorAlt));
+						LogExceptionAndDisplay(logger, ex);
 					}
 				}
 			}
@@ -448,7 +470,7 @@ public static partial class BDSM
 			OpTimer.Stop();
 			if (download_failures is not null)
 			{
-				LogMarkupText(logger, LogLevel.Error, "[red3]Could not download some files. Check the log for error details.[/]");
+				LogWithMarkup(logger, LogLevel.Error, "Could not download some files. Check the log for error details.", ErrorColorAlt);
 				foreach (Exception inner_ex in download_failures.Flatten().InnerExceptions)
 					logger.Warn(inner_ex);
 			}
@@ -462,13 +484,24 @@ public static partial class BDSM
 				.Sum(info => info.Value.TotalBytesDownloaded);
 			if (download_canceled)
 			{
-				LogMarkupText(logger, LogLevel.Warn, $"Canceled download of [gold3_1]{Pluralize(unfinished_downloads.Count(), " file")}[/]" +
-					$" ([orchid2]{FormatBytes(DLStatus.TotalBytesDownloaded - bytes_of_completed_files)}[/] wasted).");
+				LogMarkupText(logger, LogLevel.Warn, $"Canceled download of {unfinished_downloads.Count().Pluralize("file").Colorize(CancelColor)}" +
+					$" ({(DLStatus.TotalBytesDownloaded - bytes_of_completed_files).FormatBytes().Colorize(HighlightColor)} wasted).");
 			}
-			LogMarkupText(logger, LogLevel.Info, $"Completed download of [orchid2]{Pluralize(number_of_downloads_finished, " file")}[/] ([orchid2]{FormatBytes(bytes_of_completed_files)}[/])" +
-				$" in [orchid2]{(OpTimer.Elapsed.Minutes > 0 ? $"{OpTimer.Elapsed.Minutes} minutes and " : "")}" +
-				$"{Pluralize(OpTimer.Elapsed.Seconds, " second")}[/].");
-			LogMarkupText(logger, LogLevel.Info, $"Average speed: [orchid2]{FormatBytes(DLStatus.TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds)}/s[/]");
+			int total_minutes = (int)Math.Floor(OpTimer.Elapsed.TotalMinutes);
+			string minutes_summary = total_minutes switch
+			{
+				1 => $"{(total_minutes + " minute").Colorize(HighlightColor)} and ",
+				> 2 => $"{(total_minutes + " minutes").Colorize(HighlightColor)} and ",
+				_ => string.Empty
+			};
+			string seconds_summary = OpTimer.Elapsed.Seconds switch
+			{
+				1 => $"{(OpTimer.Elapsed.Seconds + " second").Colorize(HighlightColor)}",
+				_ => $"{(OpTimer.Elapsed.Seconds + " seconds").Colorize(HighlightColor)}"
+			};
+			LogMarkupText(logger, LogLevel.Info, $"Completed download of {number_of_downloads_finished.Pluralize("file").Colorize(HighlightColor)} ({bytes_of_completed_files.FormatBytes().Colorize(HighlightColor)})" +
+				$" in {minutes_summary}{seconds_summary}.");
+			LogMarkupText(logger, LogLevel.Info, $"Average speed: {((DLStatus.TotalBytesDownloaded / OpTimer.Elapsed.TotalSeconds).FormatBytes() + "/s").Colorize(HighlightColor)}");
 
 			bool display_summary = UserConfig.PromptToContinue && AnsiConsole.Confirm("Display file download summary?");
 			void LogSummary(string message)
@@ -479,14 +512,14 @@ public static partial class BDSM
 			if (unfinished_downloads.Any())
 				LogSummary("Canceled downloads:");
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> canceled_path in unfinished_downloads.OrderBy(pm => pm.Key))
-				LogSummary($"[gold3_1]{Path.GetRelativePath(UserConfig.GamePath, canceled_path.Key).EscapeMarkup()}[/]");
+				LogSummary(Path.GetRelativePath(UserConfig.GamePath, canceled_path.Key).EscapeMarkup().Colorize(CancelColor));
 			if (completed_downloads.Any())
 				LogSummary("Completed downloads:");
 			foreach (KeyValuePair<string, FileDownloadProgressInformation> completed_path in completed_downloads.OrderBy(pm => pm.Key))
-				LogSummary($"[green]{Path.GetRelativePath(UserConfig.GamePath, completed_path.Key).EscapeMarkup()}[/]");
+				LogSummary(Path.GetRelativePath(UserConfig.GamePath, completed_path.Key).EscapeMarkup().Colorize(SuccessColor));
 		}
-		if (!FilesToDownload.IsEmpty) RaiseInternalFault(logger, $"There are still {Pluralize(FilesToDownload.Count, " file")} after processing.");
-		LogMarkupText(logger, LogLevel.Info,"Finished updating.");
+		if (!FilesToDownload.IsEmpty) RaiseInternalFault(logger, $"There are still {FilesToDownload.Count.Pluralize("file")} after processing.");
+		LogWithMarkup(logger, LogLevel.Info, "Finished updating.");
 		if (UserConfig.PromptToContinue)
 			PromptBeforeExit();
 		return 0;

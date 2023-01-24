@@ -18,14 +18,14 @@ internal static class LoggingConfiguration
 	}
 	internal static readonly FileTarget default_logfile_config = new("logfile")
 	{
-		Layout = NLog.Layouts.Layout.FromString("[${longdate}]${when:when=exception != null: [${callsite-filename}${literal:text=\\:} ${callsite-linenumber}]} ${level}: ${message}${exception:format=StackTrace,Data}"),
+		Layout = NLog.Layouts.Layout.FromString("[${longdate}]${when:when=exception != null: [${callsite-filename}${literal:text=\\:} ${callsite-linenumber}]} ${level}: ${message}${exception:format=@}"),
 		FileName = "BDSM.log",
 		Footer = NLog.Layouts.Layout.FromString("[${longdate}] ${level}: == End BDSM log =="),
 		ArchiveOldFileOnStartupAboveSize = 1024 * 1024
 	};
 	internal static readonly FileTarget debug_or_trace_logfile_config = new("logfile")
 	{
-		Layout = NLog.Layouts.Layout.FromString("[${longdate}] [${callsite-filename:includeSourcePath=false}${literal:text=\\:} line ${callsite-linenumber}] ${level}: ${message}${exception:format=StackTrace,Data}"),
+		Layout = NLog.Layouts.Layout.FromString("[${longdate}] [${callsite-filename:includeSourcePath=false}${literal:text=\\:} line ${callsite-linenumber}] ${level}: ${message}${exception:format=@}"),
 		FileName = "BDSM.debug.log",
 		Footer = NLog.Layouts.Layout.FromString("[${longdate}] ${level}: == End BDSM debug log =="),
 		ArchiveOldFileOnStartupAboveSize = 1024 * 1024
@@ -54,16 +54,28 @@ internal static class LoggingConfiguration
 		}
 		return config;
 	}
-	internal static void LogMarkupText(ILogger logger, LogLevel log_level, string markup_text, bool newline = true)
+	internal static void LogWithMarkup(ILogger logger, LogLevel log_level, string message, string? custom_color_name = null, bool newline = true)
 	{
-		if (newline)
-			AnsiConsole.MarkupLine(markup_text);
-		else
-			AnsiConsole.Markup(markup_text);
-		logger.Log(log_level, Markup.Remove(markup_text));
+		string markup_text = message;
+		markup_text = custom_color_name is not null
+			? markup_text.Colorize(custom_color_name)
+			: log_level.Ordinal switch
+			{
+				3 => message.Colorize(BDSM.WarningColor),
+				4 or 5 => message.Colorize(BDSM.ErrorColor),
+				_ => message
+			};
+		if (newline) AnsiConsole.MarkupLine(markup_text);
+		else AnsiConsole.Markup(markup_text);
+		logger.Log(log_level, message);
 	}
-	internal static void LogException(ILogger logger, Exception ex) => LogException(logger, LogLevel.Error, ex);
-	internal static void LogException(ILogger logger, LogLevel log_level, Exception ex)
+	internal static void LogMarkupText(ILogger logger, LogLevel log_level, string markup_text)
+	{
+		AnsiConsole.MarkupLine(markup_text);
+		logger.Log(log_level, markup_text.RemoveMarkup());
+	}
+	internal static void LogExceptionAndDisplay(ILogger logger, Exception ex) => LogExceptionAndDisplay(logger, LogLevel.Error, ex);
+	internal static void LogExceptionAndDisplay(ILogger logger, LogLevel log_level, Exception ex)
 	{
 		AnsiConsole.WriteException(ex);
 		logger.Log(log_level, ex);

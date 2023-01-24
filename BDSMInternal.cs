@@ -11,14 +11,19 @@ using FluentFTP.Exceptions;
 namespace BDSM;
 public static partial class BDSM
 {
+	// https://spectreconsole.net/appendix/colors
 	public const string HighlightColor = "orchid2";
-	public const string FileListingColor = "turquoise2";
-	public const string SuccessColor = "green";
+	public const string ModpackNameColor = "springgreen1";
+	public const string FileListingColor = "skyblue1";
+	public const string SuccessColor = "green1";
 	public const string WarningColor = "yellow3_1";
 	public const string CancelColor = "gold3_1";
 	public const string ErrorColor = "red1";
 	public const string ErrorColorAlt = "red3";
 	public const string DeleteColor = "orangered1";
+	public static string Colorize<T1>(this T1 plain, Color color) => $"[{color.ToMarkup()}]{plain}[/]";
+	public static string Colorize<T1>(this T1 plain, string color_name) => $"[{color_name}]{plain}[/]";
+
 	internal readonly record struct DownloadCategories
 	{
 		internal required IEnumerable<KeyValuePair<string, FileDownloadProgressInformation>> QueuedDownloads { get; init; }

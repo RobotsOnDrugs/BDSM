@@ -15,21 +15,21 @@ internal record FileDownloadProgressInformation
 	public static void InitializeLogger(ILogger parent) => logger = parent;
 	public required string FilePath { get; init; }
 	public long TotalBytesDownloaded { get; set; } = 0;
-	public string TotalBytesDownloadedString => FormatBytes(TotalBytesDownloaded);
+	public string TotalBytesDownloadedString => TotalBytesDownloaded.FormatBytes();
 	private Stopwatch TotalTimeStopwatch { get; set; } = new();
 	public TimeSpan TotalTimeElapsed => TotalTimeStopwatch.Elapsed;
 	public long CurrentBytesDownloaded { get; set; } = 0;
 	public TimeSpan CurrentTimeElapsed { get; set; } = new TimeSpan();
 	public double CurrentSpeed { get; private set; }
-	public string CurrentSpeedString => FormatBytes(CurrentSpeed) + "/s";
+	public string CurrentSpeedString => CurrentSpeed.FormatBytes() + "/s";
 	public Stopwatch ProgressUpdateStopwatch { get; private set; } = new();
 	public TimeSpan ETA => new(0, 0, 0, 0, (int)Math.Round(TotalFileSize / AverageSpeed * 1000, 0));
 	public long PreviousBytesDownloaded { get; private set; } = 0;
 	public required long TotalFileSize { get; init; }
-	public string TotalFileSizeString => FormatBytes(TotalFileSize);
+	public string TotalFileSizeString => TotalFileSize.FormatBytes();
 	public ChildProgressBar FileProgressBar { get; private set; } = null!;
 	public double AverageSpeed => TotalTimeElapsed.TotalSeconds != 0 ? TotalBytesDownloaded / TotalTimeElapsed.TotalSeconds : 0;
-	public string AverageSpeedString => FormatBytes(Math.Round(AverageSpeed, 2)) + "/s";
+	public string AverageSpeedString => Math.Round(AverageSpeed, 2).FormatBytes() + "/s";
 	public bool IsInitialized { get; private set; } = false;
 	public bool IsComplete { get; private set; } = false;
 	public bool CompletedSuccessfully { get; private set; } = false;
@@ -94,16 +94,16 @@ internal static class DownloadProgress
 		internal int NumberOfFilesToDownload = 0;
 		internal int TotalNumberOfFilesToDownload = 0;
 		internal long TotalBytesToDownload = 0;
-		internal string TotalBytesToDownloadString => FormatBytes(TotalBytesToDownload);
+		internal string TotalBytesToDownloadString => TotalBytesToDownload.FormatBytes();
 		internal long TotalBytesDownloaded = 0;
-		internal string TotalBytesDownloadedString => FormatBytes(TotalBytesDownloaded);
+		internal string TotalBytesDownloadedString => TotalBytesDownloaded.FormatBytes();
 		internal double TotalCurrentSpeed = 0;
-		internal string TotalCurrentSpeedString => FormatBytes(TotalCurrentSpeed) + "/s";
+		internal string TotalCurrentSpeedString => TotalCurrentSpeed.FormatBytes() + "/s";
 		internal readonly ConcurrentDictionary<string, FileDownloadProgressInformation> FileDownloadsInformation = new();
 		internal readonly Stopwatch DownloadSpeedStopwatch = new();
 		internal readonly Stopwatch ProgressUpdateStopwatch = Stopwatch.StartNew();
 		internal double TotalDownloadSpeed => DownloadSpeedStopwatch.Elapsed.TotalSeconds != 0 ? TotalBytesDownloaded / DownloadSpeedStopwatch.Elapsed.TotalSeconds : 0;
-		internal string TotalDownloadSpeedString => FormatBytes(TotalDownloadSpeed) + "/s";
+		internal string TotalDownloadSpeedString => TotalDownloadSpeed.FormatBytes() + "/s";
 		internal TimeSpan ETA => new(0, 0, 0, 0, (int)Math.Round(TotalBytesToDownload / TotalDownloadSpeed * 1000, 0));
 
 		internal void TrackTotalCurrentSpeed()
@@ -138,7 +138,7 @@ internal static class DownloadProgress
 					Debug.Assert(DLStatus.NumberOfFilesToDownload > 0);
 					_ = Interlocked.Decrement(ref DLStatus.NumberOfFilesToDownload);
 					logger.Debug($"Completed download of a file: {Path.GetRelativePath(BDSM.UserConfig.GamePath, filepath)}");
-					logger.Debug($"""{Pluralize(DLStatus.NumberOfFilesToDownload, " file")} remaining.""");
+					logger.Debug($"""{DLStatus.NumberOfFilesToDownload.Pluralize("file")} remaining.""");
 					lock (TotalProgressBar)
 					{
 						file_download_progress.FileProgressBar.Dispose();
@@ -168,7 +168,7 @@ internal static class DownloadProgress
 					string total_progress_message = $"Downloading files ({downloads_finished} done / {downloads_in_progress} in progress / {downloads_in_queue} remaining): " +
 						$"{DLStatus.TotalBytesDownloadedString} / {DLStatus.TotalBytesToDownloadString} " +
 						$"(Current speed: {TotalCurrentSpeedString}) " +
-						$"(Average speed: {FormatBytes(DLStatus.TotalBytesDownloaded / DLStatus.DownloadSpeedStopwatch.Elapsed.TotalSeconds)}/s)";
+						$"(Average speed: {(DLStatus.TotalBytesDownloaded / DLStatus.DownloadSpeedStopwatch.Elapsed.TotalSeconds).FormatBytes()}/s)";
 					TotalProgressBar.Tick((int)(DLStatus.TotalBytesDownloaded / 1024), ETA, total_progress_message);
 					ProgressUpdateStopwatch.Restart();
 				}

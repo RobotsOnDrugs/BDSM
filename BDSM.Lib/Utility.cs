@@ -58,9 +58,15 @@ public static class Utility
 		};
 	}
 
-	public static string FormatBytes(int number_of_bytes) => FormatBytes((double)number_of_bytes);
-	public static string FormatBytes(long number_of_bytes) => FormatBytes((double)number_of_bytes);
-	public static string FormatBytes(double number_of_bytes)
+	public static string RelativeModPathToPackName(this string relative_local_path)
+	{
+		string[] path_parts = relative_local_path.Split('\\');
+		return path_parts[0] == "UserData" ? path_parts[0] : path_parts[1];
+	}
+
+	public static string FormatBytes(this int number_of_bytes) => FormatBytes((double)number_of_bytes);
+	public static string FormatBytes(this long number_of_bytes) => FormatBytes((double)number_of_bytes);
+	public static string FormatBytes(this double number_of_bytes)
 	{
 		return number_of_bytes switch
 		{
@@ -71,7 +77,7 @@ public static class Utility
 			double.NaN => "unknown"
 		};
 	}
-	public static string Pluralize(int quantity, string suffix) => quantity == 1 ? quantity.ToString() + suffix : quantity.ToString() + suffix + "s";
+	public static string Pluralize(this int quantity, string suffix) => quantity == 1 ? quantity.ToString() + " " + suffix : quantity.ToString() + " " + suffix + "s";
 	public static void PromptUser(string message)
 	{
 		Console.Write(message);
