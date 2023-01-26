@@ -363,3 +363,4 @@ MigrationBackup/
 FodyWeavers.xsd
 /UserConfiguration.yaml
 /SkipScan.yaml
+/publish.ps1
