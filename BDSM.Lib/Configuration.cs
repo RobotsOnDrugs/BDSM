@@ -198,7 +198,7 @@ public static class Configuration
 		foreach (FileInfo fileinfo in gamedir.EnumerateFiles())
 		{
 			if (fileinfo.Name is "HoneySelect2.exe") return true;
-			else if (fileinfo.Name is "AI-Shoujo.exe") return false;
+			else if (fileinfo.Name is "AI-Shoujo.exe" or "AI-Syoujyo.exe") return false;
 		}
 		return null;
 	}

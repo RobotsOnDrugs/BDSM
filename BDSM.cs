@@ -23,7 +23,7 @@ namespace BDSM;
 
 public static partial class BDSM
 {
-	public const string VERSION = "0.3.9";
+	public const string VERSION = "0.3.10";
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleOutputCP(uint wCodePageID);
