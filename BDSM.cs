@@ -23,7 +23,7 @@ namespace BDSM;
 
 public static partial class BDSM
 {
-	public const string VERSION = "0.3.10";
+	public const string VERSION = "0.3.11";
 	[LibraryImport("kernel32.dll", SetLastError = true)]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool SetConsoleOutputCP(uint wCodePageID);
@@ -356,6 +356,7 @@ public static partial class BDSM
 					AnsiConsole.MarkupLine(Path.GetRelativePath(UserConfig.GamePath, pm.FullName).EscapeMarkup().Colorize(DeleteColor));
 			}
 			logger.Info($"{FilesToDelete.Count.Pluralize("file")} marked for deletion.");
+			PromptUserToContinue();
 			foreach (FileInfo pm in FilesToDelete)
 			{
 				try

@@ -120,7 +120,7 @@ public static class BetterRepackRepositoryDefinitions
 			{
 				Name = UserDataAISModpackName,
 				RemoteRelativePath = "UserData-AIS",
-				LocalRelativePath = "UserDataAIS",
+				LocalRelativePath = "UserData",
 				DeleteClientFiles = false
 			}
 		}

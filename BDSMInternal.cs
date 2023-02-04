@@ -94,12 +94,12 @@ public static partial class BDSM
 		bool is_hs2;
 		while (true)
 		{
-			string gamepath = AnsiConsole.Ask<string>("Where is your game located? (e.g. [turquoise2]D:\\HS2[/])");
+			string gamepath = AnsiConsole.Ask<string>("Where is your game located? (e.g. " + "D:\\HS2".Colorize(FileListingColor) + ")");
 			bool? _is_hs2 = GamePathIsHS2(gamepath);
 			if (_is_hs2 is not null)
 			{
 				is_hs2 = (bool)_is_hs2;
-				AnsiConsole.MarkupLine($"- [green]Looks like {(is_hs2 ? "Honey Select 2" : "AI-Shoujo")}[/] -");
+				AnsiConsole.MarkupLine($"- Looks like {(is_hs2 ? "Honey Select 2" : "AI-Shoujo")} -".Colorize(SuccessColor));
 			}
 			else
 			{
@@ -125,7 +125,7 @@ public static partial class BDSM
 				PromptToContinue = prompt_to_continue
 			};
 			SerializeUserConfiguration(FullUserConfigurationToSimple(userconfig));
-			AnsiConsole.MarkupLine("- [green]New user configuration successfully created![/] -");
+			AnsiConsole.MarkupLine("- New user configuration successfully created! -".Colorize(SuccessColor));
 			return userconfig;
 		}
 	}
